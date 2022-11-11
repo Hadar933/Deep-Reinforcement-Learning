@@ -56,8 +56,8 @@ def episode_mean_reward(Q_function: np.ndarray, n_episodes: int = 10, n_steps: i
 
 def Q_learning(n_episodes: int = 5000,
                n_steps: int = 100,
-               alpha: float = 0.8,
-               gamma: float = 0.99,
+               alpha: float = 0.25,
+               gamma: float = 0.95,
                epsilon: float = 1.0,
                ) -> Tuple[np.ndarray, List[int], List[float]]:
     """
@@ -76,11 +76,13 @@ def Q_learning(n_episodes: int = 5000,
     steps_to_goal_arr_over_100_episodes = []
     mean_steps_to_goal_arr = []
     Q = np.zeros((env.observation_space.n, env.action_space.n))  # |S| x |A|
+    tot_steps = 0
     for ep in tqdm(range(n_episodes)):
         ep_rew = 0
         linear_decay_eps = epsilon - (1 / n_episodes)
         state = env.reset()
         for step in range(n_steps):
+            tot_steps += 1
             action = _epsilon_greedy_policy(Q[state], linear_decay_eps)
             next_state, reward, done, info = env.step(action)
             ep_rew += reward
@@ -90,7 +92,7 @@ def Q_learning(n_episodes: int = 5000,
             if done:  # either reached goal or fell to a hole
                 steps_to_goal = step if state == GOAL_STATE else n_steps
                 steps_to_goal_arr_over_100_episodes.append(steps_to_goal)
-                env.reset() # instead of moving to the next episode, we reset and try again
+                env.reset()  # instead of moving to the next episode, we reset and try again
 
             if step == n_steps - 1 and not done:  # ran out of steps without reaching goal
                 steps_to_goal = n_steps
@@ -142,23 +144,35 @@ def _check_if_in_colab():
         return False
 
 
+def smooth(scalars: List[float], weight: float) -> List[float]:  # Weight between 0 and 1
+    last = scalars[0]  # First value in the plot (first timestep)
+    smoothed = []
+    for point in scalars:
+        smoothed_val = last * weight + (1 - weight) * point  # Calculate smoothed value
+        smoothed.append(smoothed_val)  # Save it
+        last = smoothed_val  # Anchor the last smoothed value
+
+    return smoothed
+
+
 if __name__ == '__main__':
-    env.render()
     Q_f, rew, steps_to_goal_arr = Q_learning()
 
-    plt.plot(rew, linewidth=0.25)
+    plt.plot(rew, linewidth=0.25, alpha=0.5)
+    smooth_weight = 0.8
+    plt.plot(smooth(rew, smooth_weight), linewidth=0.25)
     plt.xlabel('Episode')
     plt.ylabel('Reward')
-    plt.title('Episode Reward')
+    plt.title('Episode Reward (is_slippery=True)')
     plt.grid()
-    # plt.savefig('Episode Reward')
+    plt.legend(['Original', f'Smooth {smooth_weight}'])
+    plt.savefig('Episode Reward (is_slippery=True))')
     plt.show()
-    #
-    episodes = [i for i in range(0, 5000, 100)]
-    plt.plot(episodes, steps_to_goal_arr)
+
+    plt.plot(range(0, 5000, 100), steps_to_goal_arr)
     plt.xlabel('Episode')
     plt.ylabel('Avg #steps')
-    plt.title('Avg #steps to the goal over last 100 episodes')
+    plt.title('Avg #steps to the goal over last 100 episodes (is_slippery=True)')
     plt.grid()
-    # plt.savefig('Avg #steps to the goal over last 100 episodes')
+    plt.savefig('Avg #steps to the goal over last 100 episodes (is_slippery=True)')
     plt.show()
