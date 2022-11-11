@@ -15,6 +15,7 @@ Reward:       {G:1, S,H,F:0}
 """
 env = gym.make('FrozenLake-v1', desc=None, map_name="4x4", is_slippery=False)
 env = gym.wrappers.RecordEpisodeStatistics(env)
+GOAL_STATE = 15
 
 
 # summary_dir = r"G:\My Drive\Master\Year 2\Deep-Reinforcement-Learning\ex1\tb_data"
@@ -55,8 +56,8 @@ def episode_mean_reward(Q_function: np.ndarray, n_episodes: int = 10, n_steps: i
 
 def Q_learning(n_episodes: int = 5000,
                n_steps: int = 100,
-               alpha: float = 0.5,
-               gamma: float = 0.9,
+               alpha: float = 0.8,
+               gamma: float = 0.99,
                epsilon: float = 1.0,
                ) -> Tuple[np.ndarray, List[int], List[float]]:
     """
@@ -74,28 +75,24 @@ def Q_learning(n_episodes: int = 5000,
     ep_rew_arr = []
     steps_to_goal_arr_over_100_episodes = []
     mean_steps_to_goal_arr = []
-    tot_steps = 0
     Q = np.zeros((env.observation_space.n, env.action_space.n))  # |S| x |A|
     for ep in tqdm(range(n_episodes)):
         ep_rew = 0
         linear_decay_eps = epsilon - (1 / n_episodes)
         state = env.reset()
         for step in range(n_steps):
-            tot_steps += 1
             action = _epsilon_greedy_policy(Q[state], linear_decay_eps)
             next_state, reward, done, info = env.step(action)
             ep_rew += reward
             target = reward + gamma * np.max(Q[next_state])
             Q[state, action] = (1 - alpha) * Q[state, action] + alpha * target
             state = next_state
-            if done:
-                if state == 15:  # reached goal
-                    steps_to_goal = step
-                else:
-                    steps_to_goal = n_steps
+            if done:  # either reached goal or fell to a hole
+                steps_to_goal = step if state == GOAL_STATE else n_steps
                 steps_to_goal_arr_over_100_episodes.append(steps_to_goal)
-                break
-            if step == n_steps - 1 and not done:
+                env.reset() # instead of moving to the next episode, we reset and try again
+
+            if step == n_steps - 1 and not done:  # ran out of steps without reaching goal
                 steps_to_goal = n_steps
                 steps_to_goal_arr_over_100_episodes.append(steps_to_goal)
         if ep % 100 == 0:
@@ -149,13 +146,13 @@ if __name__ == '__main__':
     env.render()
     Q_f, rew, steps_to_goal_arr = Q_learning()
 
-    # plt.plot(rew, linewidth=0.25)
-    # plt.xlabel('Episode')
-    # plt.ylabel('Reward')
-    # plt.title('Episode Reward')
-    # plt.grid()
+    plt.plot(rew, linewidth=0.25)
+    plt.xlabel('Episode')
+    plt.ylabel('Reward')
+    plt.title('Episode Reward')
+    plt.grid()
     # plt.savefig('Episode Reward')
-    # plt.show()
+    plt.show()
     #
     episodes = [i for i in range(0, 5000, 100)]
     plt.plot(episodes, steps_to_goal_arr)
