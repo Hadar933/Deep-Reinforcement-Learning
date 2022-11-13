@@ -1,6 +1,7 @@
 import random
 import torch
 import gym
+import torch.nn.functional as F
 from torch import nn
 from collections import deque
 from typing import Tuple, List
@@ -36,8 +37,8 @@ class DQN(nn.Module):
         """
         Q_net = nn.ModuleList()
         curr_dim = self.hidden_dims[0]
-        Q_net.append(nn.Linear(self.env.observation_space.n, curr_dim))
-        for next_dim in self.hidden_dims[1:-1]:
+        Q_net.append(nn.Linear(self.env.observation_space.shape[0], curr_dim))
+        for next_dim in self.hidden_dims[1:]:
             Q_net.append(nn.Linear(curr_dim, next_dim))
             curr_dim = next_dim
         Q_net.append(nn.Linear(curr_dim, self.env.action_space.n))
@@ -45,6 +46,13 @@ class DQN(nn.Module):
 
     def forward(self, state_vec):
         for layer in self.Qs_net[:-1]:
-            state_vec = nn.ReLU(layer(state_vec))
-        action_vec = nn.Softmax(self.Qs_net[-1](state_vec))
+            state_vec = F.relu(layer(state_vec))
+        action_vec = F.softmax(self.Qs_net[-1](state_vec))
         return action_vec
+
+
+if __name__ == '__main__':
+    dqn = DQN(10, 100, 100, [20, 30, 40, 50])
+    s_vec = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    a_vec = dqn(s_vec)
+    print('hi')
