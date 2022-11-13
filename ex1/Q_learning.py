@@ -13,7 +13,7 @@ Obs space:    {S: start, G: goal, H:hole (not ok to walk), F:frozen (ok to walk)
                s = curr_row * n_rows + curr_col (ex: the goal in 4x4 is 3*4+3)
 Reward:       {G:1, S,H,F:0}
 """
-env = gym.make('FrozenLake-v1', desc=None, map_name="4x4", is_slippery=False)
+env = gym.make('FrozenLake-v1', desc=None, map_name="4x4", is_slippery=True)
 env = gym.wrappers.RecordEpisodeStatistics(env)
 GOAL_STATE = 15
 
@@ -64,12 +64,11 @@ def Q_learning(n_episodes: int = 5000,
     epsilon-greedy Q-learning implementation.
         1. We plot the Q-function as heatmaps for given values
         2. After every 100 episodes we evaluate the reward (without exploration)
-    :param plot_heatmaps: True iff we wish to plot Q-function heatmaps
     :param n_episodes: number of episodes
     :param n_steps: number of steps per episode
     :param alpha: learning rate
     :param gamma: discount factor
-    :param epsilon: exploration probability
+    :param epsilon: exploration probability (decays over episodes)
     :return: resulted Q function, reward per episode array and average number of steps to goal array
     """
     ep_rew_arr = []
@@ -92,8 +91,7 @@ def Q_learning(n_episodes: int = 5000,
             if done:  # either reached goal or fell to a hole
                 steps_to_goal = step if state == GOAL_STATE else n_steps
                 steps_to_goal_arr_over_100_episodes.append(steps_to_goal)
-                env.reset()  # instead of moving to the next episode, we reset and try again
-
+                env.reset()  # instead of breaking and moving to the next episode, we reset and try again
             if step == n_steps - 1 and not done:  # ran out of steps without reaching goal
                 steps_to_goal = n_steps
                 steps_to_goal_arr_over_100_episodes.append(steps_to_goal)
@@ -133,7 +131,8 @@ def colormap(Q_func: np.ndarray, steps) -> None:
     # color-mesh plot:
     c = ax.pcolormesh(states, actions, Q_func, cmap='viridis')
     fig.colorbar(c, ax=ax)
-    plt.savefig(f"Q_function_{steps}_steps")
+    plt.show()
+    # plt.savefig(f"Q_function_{steps}_steps")
 
 
 def _check_if_in_colab():
@@ -144,11 +143,16 @@ def _check_if_in_colab():
         return False
 
 
-def smooth(scalars: List[float], weight: float) -> List[float]:  # Weight between 0 and 1
-    last = scalars[0]  # First value in the plot (first timestep)
+def smooth(reward_arr: List[float], smooth_factor: float) -> List[float]:
+    """
+    smooths the reward values using weighted running average
+    :return: smoothed reward
+    """
+    assert 0 < smooth_factor < 1, 'Smooth factor must be in (0,1)'
+    last = reward_arr[0]  # First value in the plot (first timestep)
     smoothed = []
-    for point in scalars:
-        smoothed_val = last * weight + (1 - weight) * point  # Calculate smoothed value
+    for point in reward_arr:
+        smoothed_val = last * smooth_factor + (1 - smooth_factor) * point  # Calculate smoothed value
         smoothed.append(smoothed_val)  # Save it
         last = smoothed_val  # Anchor the last smoothed value
 
@@ -166,7 +170,7 @@ if __name__ == '__main__':
     plt.title('Episode Reward (is_slippery=True)')
     plt.grid()
     plt.legend(['Original', f'Smooth {smooth_weight}'])
-    plt.savefig('Episode Reward (is_slippery=True))')
+    # plt.savefig('Episode Reward (is_slippery=True))')
     plt.show()
 
     plt.plot(range(0, 5000, 100), steps_to_goal_arr)
@@ -174,5 +178,5 @@ if __name__ == '__main__':
     plt.ylabel('Avg #steps')
     plt.title('Avg #steps to the goal over last 100 episodes (is_slippery=True)')
     plt.grid()
-    plt.savefig('Avg #steps to the goal over last 100 episodes (is_slippery=True)')
+    # plt.savefig('Avg #steps to the goal over last 100 episodes (is_slippery=True)')
     plt.show()
