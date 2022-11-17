@@ -4,7 +4,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from ex1.utils import _epsilon_greedy_policy, smooth
+from ex1.utils import _epsilon_greedy_policy, smooth, colormap
 
 """
 Action Space: { 0:left, 1:down, 2:right, 3:up}
@@ -12,7 +12,8 @@ Obs space:    {S: start, G: goal, H:hole (not ok to walk), F:frozen (ok to walk)
                s = curr_row * n_rows + curr_col (ex: the goal in 4x4 is 3*4+3)
 Reward:       {G:1, S,H,F:0}
 """
-env = gym.make('FrozenLake-v1', desc=None, map_name="4x4", is_slippery=True)
+SLIPPERY = False
+env = gym.make('FrozenLake-v1', desc=None, map_name="4x4", is_slippery=SLIPPERY)
 env = gym.wrappers.RecordEpisodeStatistics(env)
 GOAL_STATE = 15
 
@@ -48,13 +49,13 @@ def Q_learning(n_episodes: int = 5000,
             action = _epsilon_greedy_policy(env, Q[state], linear_decay_eps)
             next_state, reward, done, info = env.step(action)
             ep_rew += reward
-            target = reward + gamma * np.max(Q[next_state])
+            target = reward if done else reward + gamma * np.max(Q[next_state])
             Q[state, action] = (1 - alpha) * Q[state, action] + alpha * target
             state = next_state
             if done:  # either reached goal or fell to a hole
                 steps_to_goal = step if state == GOAL_STATE else n_steps
                 steps_to_goal_arr_over_100_episodes.append(steps_to_goal)
-                env.reset()  # instead of breaking and moving to the next episode, we reset and try again
+                break
             if step == n_steps - 1 and not done:  # ran out of steps without reaching goal
                 steps_to_goal = n_steps
                 steps_to_goal_arr_over_100_episodes.append(steps_to_goal)
@@ -71,13 +72,13 @@ def Q_learning(n_episodes: int = 5000,
 
 if __name__ == '__main__':
     Q_f, rew, steps_to_goal_arr = Q_learning()
-
+    colormap(env, Q_f, 'all')
     plt.plot(rew, linewidth=0.25, alpha=0.5)
     smooth_weight = 0.8
     plt.plot(smooth(rew, smooth_weight), linewidth=0.25)
     plt.xlabel('Episode')
     plt.ylabel('Reward')
-    plt.title('Episode Reward (is_slippery=True)')
+    plt.title(f'Episode Reward (is_slippery={SLIPPERY})')
     plt.grid()
     plt.legend(['Original', f'Smooth {smooth_weight}'])
     # plt.savefig('Episode Reward (is_slippery=True))')
@@ -86,7 +87,7 @@ if __name__ == '__main__':
     plt.plot(range(0, 5000, 100), steps_to_goal_arr)
     plt.xlabel('Episode')
     plt.ylabel('Avg #steps')
-    plt.title('Avg #steps to the goal over last 100 episodes (is_slippery=True)')
+    plt.title(f'Avg #steps to the goal over last 100 episodes (is_slippery={SLIPPERY})')
     plt.grid()
     # plt.savefig('Avg #steps to the goal over last 100 episodes (is_slippery=True)')
     plt.show()

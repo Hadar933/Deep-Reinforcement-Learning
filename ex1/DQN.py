@@ -1,8 +1,9 @@
 import random
 import torch
 import gym
-import torch.nn.functional as F
-from torch import nn
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.optimizers import Adam
 from collections import deque
 from typing import Tuple, List
 
@@ -18,40 +19,33 @@ class ExperienceReplay:
         self._exp_rep.append(experience)
 
     def sample(self, batch_size: int):
-        return torch.tensor(random.sample(self._exp_rep, batch_size))
+        return random.sample(self._exp_rep, batch_size)
 
 
-class DQN(nn.Module):
-    def __init__(self, exp_rep_size: int, n_episodes: int, n_steps: int, hidden_dims: List[int]):
+class DQN:
+    def __init__(self, exp_rep_size: int, n_episodes: int, n_steps: int, learning_rate: float, hidden_dims: List[int]):
         super().__init__()
         self.n_episodes: int = n_episodes
         self.n_steps: int = n_steps
         self.hidden_dims: List[int] = hidden_dims
+        self.lr: float = learning_rate
         self.D: ExperienceReplay = ExperienceReplay(exp_rep_size)
         self.env: gym.wrappers.time_limit.TimeLimit = gym.make('CartPole-v1')
-        self.Qs_net: nn.ModuleList = self._set_Q_net()
+        self.Qs_net = self._set_Q_net()
 
-    def _set_Q_net(self) -> nn.ModuleList:
+    def _set_Q_net(self):
         """
         Our Q_net takes in a state vector (with shape env.observation_space.n) and outputs an action vector
         (with shape env.action_space.n). In can be implemented with arbitrary number of linear hidden layers
         :return: a torch linear model
         """
-        Q_net = nn.ModuleList()
-        curr_dim = self.hidden_dims[0]
-        Q_net.append(nn.Linear(self.env.observation_space.shape[0], curr_dim))
+        Q_net = Sequential()
+        Q_net.add(Dense(self.hidden_dims[0], input_dim=self.env.observation_space.shape[0], activation='relu'))
         for next_dim in self.hidden_dims[1:]:
-            Q_net.append(nn.Linear(curr_dim, next_dim))
-            curr_dim = next_dim
-        Q_net.append(nn.Linear(curr_dim, self.env.action_space.n))
+            Q_net.append(Dense(next_dim, activation='relu'))
+        Q_net.append(Dense(self.env.action_space.shape[0], activation='softmax'))
+        Q_net.compile(loss='mse', optimizer=Adam(lr=self.lr))
         return Q_net
-
-    def forward(self, state_vec):
-        state_vec = state_vec.to(device)
-        for layer in self.Qs_net[:-1]:
-            state_vec = F.relu(layer(state_vec))
-        action_vec = F.softmax(self.Qs_net[-1](state_vec))
-        return action_vec
 
 
 if __name__ == '__main__':
