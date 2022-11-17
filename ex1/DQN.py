@@ -59,7 +59,7 @@ class DQN:
         for next_dim in self.hidden_dims[1:]:
             Q_net.add(Dense(next_dim, activation='relu'))
         Q_net.add(Dense(self.env.action_space.n, activation='softmax'))
-        Q_net.compile(loss='mse', optimizer=Adam(learning_rate=self.lr))
+        Q_net.compile(loss='mse', optimizer=Adam())
         return Q_net
 
     def _update_target(self):
@@ -83,21 +83,21 @@ class DQN:
 
 
 if __name__ == '__main__':
-    n_episodes = 500
+    n_episodes = 5000
     n_steps = 100
-    batch_size = 25
+    batch_size = 100
     learning_cycles = 1
     epsilon_decay = 0.99
     print_interval = 10
-    min_step_learn = 300
-    dqn = DQN(exp_rep_size=1000, n_episodes=n_episodes, n_steps=n_steps, learning_rate=0.1, hidden_dims=[4, 4, 2],
-              gamma=0.99, target_update_interval=10)
+    min_step_learn = 250
+    dqn = DQN(exp_rep_size=1000, n_episodes=n_episodes, n_steps=n_steps, learning_rate=None, hidden_dims=[4, 4, 2],
+              gamma=0.99, target_update_interval=6)
     epsilon = 1
     ep_reward = 0
     avg_rewards = []
     for ep in tqdm(range(n_episodes)):
         state = dqn.env.reset()
-        initialization = len(dqn.D) <= min_step_learn
+        initialization = len(dqn.D) <= max(min_step_learn,batch_size)
         for step in range(n_steps):
             action = dqn.get_action(np.expand_dims(state, 0),epsilon = 1 if initialization else epsilon)
             next_state, reward, done, info = dqn.env.step(action)
@@ -106,18 +106,24 @@ if __name__ == '__main__':
             if done:
                 break
         if ep % print_interval==0:
-            avg_reward = ep_reward/dqn.target_update_interval
+            avg_reward = ep_reward/print_interval
             print(avg_reward)
             avg_rewards.append(avg_reward)
             ep_reward = 0
+            x_fig = np.arange(n_episodes)
+            y_fig = np.zeros_like(x_fig)*np.NAN
+            y_fig[:len(avg_rewards)] = np.array(avg_rewards)
+            f = plt.plot(np.array(avg_rewards))
+            plt.savefig('progress.png')
+            plt.close()
 
         if initialization:
             continue
         for _ in range(learning_cycles):
             batch = dqn.D.sample(batch_size)
             dqn.learn(batch)
-        epsilon *= epsilon_decay
+        
         if ep % dqn.target_update_interval==0:
             dqn._update_target()
+            epsilon *= epsilon_decay
     plt.plot(avg_rewards)
-    plt.show()
