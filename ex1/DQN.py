@@ -22,14 +22,14 @@ class ExperienceReplay:
         self.size: int = size
         self._exp_rep: deque = deque([], maxlen=size)
 
-    def append(self, experience: Tuple[float, float, float]):
+    def append(self, experience):
         self._exp_rep.append(experience)
 
     def sample(self, batch_size: int):
         rand_sample = random.sample(self._exp_rep, batch_size)
         dict_batch = {
             'states': np.stack([b_step[0] for b_step in rand_sample]),
-            'actions': np.array([b_step[2] for b_step in rand_sample]),
+            'actions': np.array([b_step[1] for b_step in rand_sample]),
             'rewards': np.array([b_step[2] for b_step in rand_sample]),
             'next_states': np.stack([b_step[3] for b_step in rand_sample]),
             'dones': np.array([b_step[4] for b_step in rand_sample])
@@ -42,10 +42,10 @@ class ExperienceReplay:
 class DQN():
 
     def __init__(
-                self, env : gym.Env, hidden_dims: List[int] = [128,64], lr : float = 0.001 , epsilon: float = 0.05, gamma : float = 0.95, 
-                learning_epochs: int = 5, batch_size : int = 128, target_update_interval: int =5, steps_per_epoch: int = 500, 
-                buffer_size : int =10000, min_steps_learn: int = 128, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
-                final_activation : str = 'softmax', optimizer_name: str = 'Adam' , loss_fn_name : str = 'mse', 
+                self, env : gym.Env, hidden_dims: List[int] = [8,8,8], lr : float = 0.1 , epsilon_bounds: list[float,float] = [0.4, 0.01], gamma : float = 0.95, 
+                learning_epochs: int = 5, batch_size : int = 128, target_update_interval: int =5, steps_per_epoch: int = 128, 
+                buffer_size : int =10000, min_steps_learn: int = 1000, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
+                final_activation : str = 'linear', optimizer_name: str = 'RMSprop' , loss_fn_name : str = 'mse', 
                 kernel_initializer: str = 'glorot_normal', report_interval = 1):
         assert optimizer_name in OPTIMIZERS.keys() ; "Unknown optimizer"
         self.env = env
@@ -54,7 +54,8 @@ class DQN():
         self.steps_per_epoch = steps_per_epoch
         self.hidden_dims = hidden_dims
         self.target_update_interval = target_update_interval
-        self.epsilon = epsilon
+        self.epsilon = epsilon_bounds[0]
+        self.epsilon_bounds = epsilon_bounds
         self.gamma = gamma
         self.lr = lr
         self.min_steps_learn = min_steps_learn
@@ -70,7 +71,9 @@ class DQN():
         self.replay_buffer = ExperienceReplay(buffer_size)
         self.q = self._build_model()
         self.q_target = self._build_model()
-    
+
+
+
     def _build_model(self):
         net = Sequential()
         net.add(Dense(self.hidden_dims[0], input_dim=self.state_space, activation=self.inner_act))
@@ -83,6 +86,10 @@ class DQN():
     def _update_target(self):
         self.q_target.set_weights(self.q.get_weights())
 
+    def _update_eps(self):
+        self.epsilon = self.epsilon_bounds[0]- (self.epsilon_bounds[0]-self.epsilon_bounds[1])*((self.epoch+1)/self.n_epochs)
+        print(self.epsilon)
+
     def get_action(self, state, epsilon = None):
         epsilon  = self.epsilon if epsilon is None else epsilon
         if epsilon > random.random():
@@ -94,7 +101,7 @@ class DQN():
     def learn(self):
         batch = self.replay_buffer.sample(self.batch_size)
         gamma = (1 - batch['dones']) * self.gamma
-        y = batch['rewards'] + gamma * np.argmax(self.q_target(batch['next_states']),axis=1)
+        y = batch['rewards'] + gamma * np.max(self.q_target(batch['next_states']),axis=1)
         y_q = self.q.predict(batch['states'],verbose = 0)                                      # Predict Qs on all actions
         y_q[np.arange(len(y_q)).tolist(),batch['actions'].astype(int).tolist()]=y       # Change the values of the actual actions to target (y)
         loss = self.q.fit(batch['states'],y_q, verbose = 0)                                            # loss != 0 only on actual actions takes
@@ -111,14 +118,15 @@ class DQN():
         for step_num in range(n_steps):
             action = self.get_action(np.expand_dims(state, 0),epsilon)
             next_state, reward, done, info = self.env.step(action)
-            self.replay_buffer.append([state, action, reward, next_state, done])
-            ep_reward += reward
             episode_steps +=1
+            self.replay_buffer.append([state, action, reward, next_state, done])
             if done:
                 state = self.env.reset()
                 episodes +=1
                 ep_lengths.append(episode_steps)
                 episode_steps = 0
+            ep_reward += reward
+            
             if show_progress and step_num % 10 == 0:
                 pbar.update(10)
         if show_progress:
@@ -142,8 +150,12 @@ class DQN():
         self.rews = [avg_rew]
         self.lens = [avg_len]
         self.output_report()
+        self.n_epochs = n_epochs
+        print(f'Training for {n_epochs} epochs')
         for ep in tqdm(range(n_epochs)):
-            avg_rew, avg_len = self.collect_batch(self.steps_per_epoch,show_progress=True,epsilon =self.epsilon)
+            self.epoch = ep
+            self._update_eps()
+            avg_rew, avg_len = self.collect_batch(self.steps_per_epoch)
             self.learn()
             self.rews.append(avg_rew)
             self.lens.append(avg_len)
