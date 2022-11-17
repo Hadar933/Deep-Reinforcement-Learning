@@ -6,6 +6,8 @@ from torch import nn
 from collections import deque
 from typing import Tuple, List
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
 class ExperienceReplay:
     def __init__(self, size: int):
@@ -45,6 +47,7 @@ class DQN(nn.Module):
         return Q_net
 
     def forward(self, state_vec):
+        state_vec = state_vec.to(device)
         for layer in self.Qs_net[:-1]:
             state_vec = F.relu(layer(state_vec))
         action_vec = F.softmax(self.Qs_net[-1](state_vec))
@@ -52,7 +55,4 @@ class DQN(nn.Module):
 
 
 if __name__ == '__main__':
-    dqn = DQN(10, 100, 100, [20, 30, 40, 50])
-    s_vec = torch.tensor([1.0, 2.0, 3.0, 4.0])
-    a_vec = dqn(s_vec)
-    print('hi')
+    pass
