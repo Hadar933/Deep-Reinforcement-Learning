@@ -8,6 +8,7 @@ from typing import Tuple, List, Union
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
+import Config
 
 
 OPTIMIZERS={
@@ -41,11 +42,11 @@ class ExperienceReplay:
 class DQN():
 
     def __init__(
-                self, env : gym.Env, hidden_dims: List[int] = [16,32,8], lr : float = 0.001 , epsilon: float = 0.1, gamma : float = 0.95, 
-                learning_epochs: int = 1, batch_size : int = 32, target_update_interval: int =2, steps_per_epoch: int = 100, 
-                buffer_size : int =10000, min_steps_learn: int = 100, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
+                self, env : gym.Env, hidden_dims: List[int] = [128,64], lr : float = 0.001 , epsilon: float = 0.05, gamma : float = 0.95, 
+                learning_epochs: int = 5, batch_size : int = 128, target_update_interval: int =5, steps_per_epoch: int = 500, 
+                buffer_size : int =10000, min_steps_learn: int = 128, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
                 final_activation : str = 'softmax', optimizer_name: str = 'Adam' , loss_fn_name : str = 'mse', 
-                kernel_initializer: str = 'glorot_normal', report_interval = 3):
+                kernel_initializer: str = 'glorot_normal', report_interval = 1):
         assert optimizer_name in OPTIMIZERS.keys() ; "Unknown optimizer"
         self.env = env
         self.action_space   = env.action_space.n
@@ -82,9 +83,9 @@ class DQN():
     def _update_target(self):
         self.q_target.set_weights(self.q.get_weights())
 
-    def __call__(self, state, epsilon = None):
+    def get_action(self, state, epsilon = None):
         epsilon  = self.epsilon if epsilon is None else epsilon
-        if epsilon < random.random():
+        if epsilon > random.random():
             action = self.env.action_space.sample()
         else:
             action = np.argmax(self.q.predict(state,verbose= self.verbose))
@@ -93,7 +94,7 @@ class DQN():
     def learn(self):
         batch = self.replay_buffer.sample(self.batch_size)
         gamma = (1 - batch['dones']) * self.gamma
-        y = batch['rewards'] + gamma * np.argmax(self.q_target(batch['next_states']))
+        y = batch['rewards'] + gamma * np.argmax(self.q_target(batch['next_states']),axis=1)
         y_q = self.q.predict(batch['states'],verbose = 0)                                      # Predict Qs on all actions
         y_q[np.arange(len(y_q)).tolist(),batch['actions'].astype(int).tolist()]=y       # Change the values of the actual actions to target (y)
         loss = self.q.fit(batch['states'],y_q, verbose = 0)                                            # loss != 0 only on actual actions takes
@@ -108,7 +109,7 @@ class DQN():
         if show_progress:
             pbar = tqdm(total=n_steps)
         for step_num in range(n_steps):
-            action = self(np.expand_dims(state, 0),epsilon)
+            action = self.get_action(np.expand_dims(state, 0),epsilon)
             next_state, reward, done, info = self.env.step(action)
             self.replay_buffer.append([state, action, reward, next_state, done])
             ep_reward += reward
@@ -119,7 +120,9 @@ class DQN():
                 ep_lengths.append(episode_steps)
                 episode_steps = 0
             if show_progress and step_num % 10 == 0:
-                pbar.update(step_num)
+                pbar.update(10)
+        if show_progress:
+            pbar.close()
         ep_lengths.append(episode_steps)
         return ep_reward/episodes, sum(ep_lengths)/len(ep_lengths)
 
@@ -129,28 +132,23 @@ class DQN():
         ax[0].set_title('Average episode Reward')
         ax[1].plot(self.lens)
         ax[1].set_title('Average Episode Length')
-        # ax[2].plot(self.losses)
-        # ax[2].set_title('Loss')
         plt.savefig('progress.png')
-        plt.close()
+        plt.close('all')
 
     def train(self, n_epochs):
         initial_steps = max(self.min_steps_learn, self.batch_size)
         print('collecting decorrelation steps')
-        self.collect_batch(initial_steps,epsilon = 1, show_progress=True)
-        self.rews = []
-        self.lens = []
-        # self.losses = []
+        avg_rew, avg_len = self.collect_batch(initial_steps,epsilon = 1, show_progress=True)
+        self.rews = [avg_rew]
+        self.lens = [avg_len]
+        self.output_report()
         for ep in tqdm(range(n_epochs)):
-            avg_rew, avg_len = self.collect_batch(self.steps_per_epoch)
+            avg_rew, avg_len = self.collect_batch(self.steps_per_epoch,show_progress=True,epsilon =self.epsilon)
             self.learn()
             self.rews.append(avg_rew)
             self.lens.append(avg_len)
-            # self.losses.append(loss)
-
             if ep % self.report_interval == 0:
                 self.output_report()
-
             if ep % self.target_update_interval:
                 self._update_target()
 
