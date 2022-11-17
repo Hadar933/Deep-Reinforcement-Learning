@@ -7,6 +7,7 @@ from collections import deque
 from typing import Tuple, List
 from tqdm import tqdm
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 class ExperienceReplay:
@@ -84,19 +85,19 @@ class DQN:
 if __name__ == '__main__':
     n_episodes = 500
     n_steps = 100
-    batch_size = 100
+    batch_size = 25
+    learning_cycles = 1
     epsilon_decay = 0.99
-    dqn = DQN(exp_rep_size=10000, n_episodes=n_episodes, n_steps=n_steps, learning_rate=0.01, hidden_dims=[4, 4, 2],
+    print_interval = 10
+    min_step_learn = 300
+    dqn = DQN(exp_rep_size=1000, n_episodes=n_episodes, n_steps=n_steps, learning_rate=0.1, hidden_dims=[4, 4, 2],
               gamma=0.99, target_update_interval=10)
     epsilon = 1
     ep_reward = 0
     avg_rewards = []
     for ep in tqdm(range(n_episodes)):
         state = dqn.env.reset()
-        
-        
-        initialization = len(dqn.D) <= batch_size
-
+        initialization = len(dqn.D) <= min_step_learn
         for step in range(n_steps):
             action = dqn.get_action(np.expand_dims(state, 0),epsilon = 1 if initialization else epsilon)
             next_state, reward, done, info = dqn.env.step(action)
@@ -104,14 +105,19 @@ if __name__ == '__main__':
             ep_reward += reward
             if done:
                 break
-        if initialization:
-            continue
-        batch = dqn.D.sample(batch_size)
-        dqn.learn(batch)
-        epsilon *= epsilon_decay
-        if ep % dqn.target_update_interval==0:
-            dqn._update_target()
+        if ep % print_interval==0:
             avg_reward = ep_reward/dqn.target_update_interval
             print(avg_reward)
             avg_rewards.append(avg_reward)
             ep_reward = 0
+
+        if initialization:
+            continue
+        for _ in range(learning_cycles):
+            batch = dqn.D.sample(batch_size)
+            dqn.learn(batch)
+        epsilon *= epsilon_decay
+        if ep % dqn.target_update_interval==0:
+            dqn._update_target()
+    plt.plot(avg_rewards)
+    plt.show()
