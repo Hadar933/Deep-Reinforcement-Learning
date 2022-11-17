@@ -37,7 +37,9 @@ class ExperienceReplay:
 
     def __len__(self):
         return self._exp_rep.__len__()
+
 class DQN():
+
     def __init__(
                 self, env : gym.Env, hidden_dims: List[int] = [16,32,8], lr : float = 0.001 , epsilon: float = 0.1, gamma : float = 0.95, 
                 learning_epochs: int = 1, batch_size : int = 32, target_update_interval: int =2, steps_per_epoch: int = 100, 
@@ -67,7 +69,6 @@ class DQN():
         self.replay_buffer = ExperienceReplay(buffer_size)
         self.q = self._build_model()
         self.q_target = self._build_model()
-        
     
     def _build_model(self):
         net = Sequential()
@@ -154,74 +155,8 @@ class DQN():
                 self._update_target()
 
 
-    
-
-
-
-# class DQN:
-#     def __init__(self, exp_rep_size: int, n_episodes: int, n_steps: int, learning_rate: float, hidden_dims: List[int],
-#                  gamma: float, target_update_interval: int = 10):
-#         super().__init__()
-#         self.n_episodes: int = n_episodes
-#         self.n_steps: int = n_steps
-#         self.hidden_dims: List[int] = hidden_dims
-#         self.lr: float = learning_rate
-#         self.gamma = gamma
-#         self.D: ExperienceReplay = ExperienceReplay(exp_rep_size)
-#         self.env: gym.wrappers.time_limit.TimeLimit = gym.make('CartPole-v1')
-#         self.Qs_net = self._set_Q_net()
-#         self.Qs_target = self._set_Q_net()
-#         self.target_update_interval = target_update_interval
-
-#     def _set_Q_net(self):
-#         """
-#         Our Q_net takes in a state vector (with shape env.observation_space.n) and outputs an action vector
-#         (with shape env.action_space.n). In can be implemented with arbitrary number of linear hidden layers
-#         :return: a torch linear model
-#         """
-#         Q_net = Sequential()
-#         Q_net.add(Dense(self.hidden_dims[0], input_dim=self.env.observation_space.shape[0], activation='relu'))
-#         for next_dim in self.hidden_dims[1:]:
-#             Q_net.add(Dense(next_dim, activation='relu'))
-#         Q_net.add(Dense(self.env.action_space.n, activation='softmax'))
-#         Q_net.compile(loss='mse', optimizer=RMSprop())
-#         return Q_net
-
-#     def _update_target(self):
-#         self.Qs_target.set_weights(self.Qs_net.get_weights())
-
-#     def learn(self, batch):
-#         gamma = (1 - batch['dones']) * self.gamma
-#         y = batch['rewards'] + gamma * np.argmax(self.Qs_target(batch['next_states']))
-#         y_q = self.Qs_net.predict(batch['states'],verbose = 0)                                      # Predict Qs on all actions
-#         y_q[np.arange(len(y_q)).tolist(),batch['actions'].astype(int).tolist()]=y       # Change the values of the actual actions to target (y)
-#         self.Qs_net.fit(batch['states'],y_q, verbose = 0)                                            # loss != 0 only on actual actions takes
-
-
-#     def get_action(self, state, epsilon=0.1):
-#         if epsilon < random.random():
-#             action = self.env.action_space.sample()
-#         else:
-#             action = np.argmax(self.Qs_net.predict(state,verbose= 0))
-#         return action
-
-
 if __name__ == '__main__':
     env = gym.make('CartPole-v1')
-
     dqn = DQN(env)
     dqn.train(400)
-
-    # n_episodes = 1000
-    # n_steps = 100
-    # batch_size = 32
-    # learning_cycles = 1
-    # epsilon_decay = 0.999
-    # print_interval = 4
-    # min_step_learn = 0
-    # dqn = DQN(exp_rep_size=5000, n_episodes=n_episodes, n_steps=n_steps, learning_rate=0.001, hidden_dims=[8, 16, 4],
-    #           gamma=0.999, target_update_interval=4)
-    # epsilon = 1
-    # avg_rewards = []
-    # ep_reward = 0
     
