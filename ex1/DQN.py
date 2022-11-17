@@ -17,11 +17,17 @@ class ExperienceReplay:
         self._exp_rep.append(experience)
 
     def sample(self, batch_size: int):
-        return random.sample(self._exp_rep, batch_size)
+        batched_steps =  random.sample(self._exp_rep, batch_size)
+        states = np.stack([b_step[0] for b_step in batched_steps])
+        actions = np.array([b_step[1] for b_step in batched_steps])
+        rewards = np.array([b_step[2] for b_step in batched_steps])
+        next_states = np.stack([b_step[3] for b_step in batched_steps])
+        dones = np.array([b_step[4] for b_step in batched_steps])
+        return (states, actions, rewards,next_states,dones)
 
 
 class DQN:
-    def __init__(self, exp_rep_size: int, n_episodes: int, n_steps: int, learning_rate: float, hidden_dims: List[int]):
+    def __init__(self, exp_rep_size: int, n_episodes: int, n_steps: int, learning_rate: float, hidden_dims: List[int], gamma: float):
         super().__init__()
         self.n_episodes: int = n_episodes
         self.n_steps: int = n_steps
@@ -30,6 +36,8 @@ class DQN:
         self.D: ExperienceReplay = ExperienceReplay(exp_rep_size)
         self.env: gym.wrappers.time_limit.TimeLimit = gym.make('CartPole-v1')
         self.Qs_net = self._set_Q_net()
+        self.Qs_target = self._set_Q_net()
+        self.gamma = gamma
 
     def _set_Q_net(self):
         """
@@ -45,8 +53,15 @@ class DQN:
         Q_net.compile(loss='mse', optimizer=Adam(learning_rate=self.lr))
         return Q_net
 
+    def _update_target(self):
+        self.Qs_target.set_weights(self.Qs_net.get_weights()) 
+
     def learn(self, batch_size):
-        pass
+        batch = self.D.sample(batch_size)
+        gamma = batch[4]*self.gamma
+        y = batch[2]+gamma*np.argmax(self.Qs_target(batch[3]))
+        # TODO: Fit() on Qs_net
+
 
     def get_action(self, state, epsilon = 0):
         if epsilon > random.random():
@@ -59,33 +74,20 @@ class DQN:
 
 
 if __name__ == '__main__':
-    dqn = DQN(1, 1, 5, 0.01, [1, 2, 3])
+    dqn = DQN(exp_rep_size = 10, n_episodes=5, n_steps=10, learning_rate=0.01, hidden_dims = [4,4,4], gamma = 0.99)
     n_episodes = 500
+    n_steps = 10
     for ep in tqdm(range(n_episodes)):
-        obs = dqn.env.reset()
+        state = dqn.env.reset()
+        print(state)
         for step in range(n_steps):
-            act = dqn.get_action(s)
+            act = dqn.get_action(np.expand_dims(state,0))
             next_state, reward, done, info = dqn.env.step(act)
-            dqn.D.append(state,act,reward,next_state,done)
-            dqn.learn(batch_size=1)
-            target = reward if done else reward + gamma * np.max(Q[next_state])
-            Q[state, action] = (1 - alpha) * Q[state, action] + alpha * target
-            state = next_state
-            if done:  # either reached goal or fell to a hole
-                steps_to_goal = step if state == GOAL_STATE else n_steps
-                steps_to_goal_arr_over_100_episodes.append(steps_to_goal)
-                break
-            if step == n_steps - 1 and not done:  # ran out of steps without reaching goal
-                steps_to_goal = n_steps
-                steps_to_goal_arr_over_100_episodes.append(steps_to_goal)
-        if ep % 100 == 0:
-            mean_steps = np.mean(steps_to_goal_arr_over_100_episodes)
-            mean_steps_to_goal_arr.append(mean_steps.item())
-            steps_to_goal_arr_over_100_episodes = []
+            dqn.D.append([state,act,reward,next_state,done])
+        dqn.learn(5)
+        
 
-        epsilon = linear_decay_eps
-        ep_rew_arr.append(ep_rew)
-    env.close()
-    return Q, ep_rew_arr, mean_steps_to_goal_arr
-    s = dqn.env.observation_space.sample()
-    a = dqn.Qs_net.predict(s)
+            # dqn.learn(batch_size=1, n_ep = 1)
+        break
+    # s = dqn.env.observation_space.sample()
+    # a = dqn.Qs_net.predict(s)
