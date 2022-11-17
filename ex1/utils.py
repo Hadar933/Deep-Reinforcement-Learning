@@ -4,10 +4,11 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 
-def _epsilon_greedy_policy(env, Q_s: np.ndarray,
-                           epsilon: float) -> float:
+def epsilon_greedy_policy(env, Q_s: np.ndarray,
+                          epsilon: float) -> float:
     """
     chooses a random action with prob epsilon and a greedy action with prob. 1-epsilon
+    :param env: gym environment we work on
     :param Q_s: all state-action value associated with some specific state s
     :param epsilon: sample probability
     :return: an action

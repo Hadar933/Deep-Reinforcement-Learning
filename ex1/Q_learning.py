@@ -4,7 +4,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from ex1.utils import _epsilon_greedy_policy, smooth, colormap
+from ex1.utils import epsilon_greedy_policy, smooth, colormap
 
 """
 Action Space: { 0:left, 1:down, 2:right, 3:up}
@@ -46,7 +46,7 @@ def Q_learning(n_episodes: int = 5000,
         state = env.reset()
         for step in range(n_steps):
             tot_steps += 1
-            action = _epsilon_greedy_policy(env, Q[state], linear_decay_eps)
+            action = epsilon_greedy_policy(env, Q[state], linear_decay_eps)
             next_state, reward, done, info = env.step(action)
             ep_rew += reward
             target = reward if done else reward + gamma * np.max(Q[next_state])
