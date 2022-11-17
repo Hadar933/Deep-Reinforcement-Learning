@@ -42,11 +42,13 @@ class DQN:
         Q_net = Sequential()
         Q_net.add(Dense(self.hidden_dims[0], input_dim=self.env.observation_space.shape[0], activation='relu'))
         for next_dim in self.hidden_dims[1:]:
-            Q_net.append(Dense(next_dim, activation='relu'))
-        Q_net.append(Dense(self.env.action_space.shape[0], activation='softmax'))
-        Q_net.compile(loss='mse', optimizer=Adam(lr=self.lr))
+            Q_net.add(Dense(next_dim, activation='relu'))
+        Q_net.add(Dense(self.env.action_space.n, activation='softmax'))
+        Q_net.compile(loss='mse', optimizer=Adam(learning_rate=self.lr))
         return Q_net
 
 
 if __name__ == '__main__':
-    pass
+    dqn = DQN(1, 1, 5, 0.01, [1, 2, 3])
+    s = dqn.env.observation_space.sample()
+    a = dqn.Qs_net.predict(s)
