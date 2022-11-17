@@ -28,10 +28,13 @@ class ExperienceReplay:
         }
         return dict_batch
 
+    def __len__(self):
+        return self._exp_rep.__len__()
+
 
 class DQN:
     def __init__(self, exp_rep_size: int, n_episodes: int, n_steps: int, learning_rate: float, hidden_dims: List[int],
-                 gamma: float):
+                 gamma: float, target_update_interval: int = 10):
         super().__init__()
         self.n_episodes: int = n_episodes
         self.n_steps: int = n_steps
@@ -42,6 +45,7 @@ class DQN:
         self.env: gym.wrappers.time_limit.TimeLimit = gym.make('CartPole-v1')
         self.Qs_net = self._set_Q_net()
         self.Qs_target = self._set_Q_net()
+        self.target_update_interval = target_update_interval
 
     def _set_Q_net(self):
         """
@@ -63,29 +67,51 @@ class DQN:
     def learn(self, batch):
         gamma = (1 - batch['dones']) * self.gamma
         y = batch['rewards'] + gamma * np.argmax(self.Qs_target(batch['next_states']))
-        # TODO: Fit() on Qs_net
+        y_q = self.Qs_net.predict(batch['states'],verbose = 0)                                      # Predict Qs on all actions
+        y_q[np.arange(len(y_q)).tolist(),batch['actions'].astype(int).tolist()]=y       # Change the values of the actual actions to target (y)
 
-    def get_action(self, state, epsilon=0):
-        if epsilon > random.random():
+        self.Qs_net.fit(batch['states'],y_q, verbose = 0)                                            # loss != 0 only on actual actions takes
+
+
+    def get_action(self, state, epsilon=0.1):
+        if epsilon < random.random():
             action = self.env.action_space.sample()
         else:
-            action = np.argmax(self.Qs_net.predict(state))
+            action = np.argmax(self.Qs_net.predict(state,verbose= 0))
         return action
 
 
 if __name__ == '__main__':
-    n_episodes = 5
-    n_steps = 10
-    batch_size = 5
-    dqn = DQN(exp_rep_size=10, n_episodes=n_episodes, n_steps=n_steps, learning_rate=0.01, hidden_dims=[4, 4, 4],
-              gamma=0.99)
-
+    n_episodes = 500
+    n_steps = 100
+    batch_size = 100
+    epsilon_decay = 0.99
+    dqn = DQN(exp_rep_size=10000, n_episodes=n_episodes, n_steps=n_steps, learning_rate=0.01, hidden_dims=[4, 4, 2],
+              gamma=0.99, target_update_interval=10)
+    epsilon = 1
+    ep_reward = 0
+    avg_rewards = []
     for ep in tqdm(range(n_episodes)):
         state = dqn.env.reset()
-        print(state)
+        
+        
+        initialization = len(dqn.D) <= batch_size
+
         for step in range(n_steps):
-            action = dqn.get_action(np.expand_dims(state, 0))
+            action = dqn.get_action(np.expand_dims(state, 0),epsilon = 1 if initialization else epsilon)
             next_state, reward, done, info = dqn.env.step(action)
             dqn.D.append([state, action, reward, next_state, done])
+            ep_reward += reward
+            if done:
+                break
+        if initialization:
+            continue
         batch = dqn.D.sample(batch_size)
         dqn.learn(batch)
+        epsilon *= epsilon_decay
+        if ep % dqn.target_update_interval==0:
+            dqn._update_target()
+            avg_reward = ep_reward/dqn.target_update_interval
+            print(avg_reward)
+            avg_rewards.append(avg_reward)
+            ep_reward = 0
