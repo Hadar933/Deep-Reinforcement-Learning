@@ -42,11 +42,11 @@ class ExperienceReplay:
 class DQN():
 
     def __init__(
-                self, env : gym.Env, hidden_dims: List[int] = [8,8,8], lr : float = 0.1 , epsilon_bounds: list[float,float] = [0.4, 0.01], gamma : float = 0.95, 
-                learning_epochs: int = 5, batch_size : int = 128, target_update_interval: int =5, steps_per_epoch: int = 128, 
-                buffer_size : int =10000, min_steps_learn: int = 1000, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
+                self, env : gym.Env, hidden_dims: List[int] = [8,32], lr : float = 0.001 , epsilon_bounds: list[float,float] = [0.3, 0.01], gamma : float = 0.95, 
+                learning_epochs: int = 5, batch_size : int = 32, target_update_interval: int =10, steps_per_epoch: int = 256, 
+                buffer_size : int =5000, min_steps_learn: int = 0, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
                 final_activation : str = 'linear', optimizer_name: str = 'RMSprop' , loss_fn_name : str = 'mse', 
-                kernel_initializer: str = 'glorot_normal', report_interval = 1):
+                kernel_initializer: str = 'glorot_uniform', report_interval = 1):
         assert optimizer_name in OPTIMIZERS.keys() ; "Unknown optimizer"
         self.env = env
         self.action_space   = env.action_space.n
@@ -95,7 +95,7 @@ class DQN():
         if epsilon > random.random():
             action = self.env.action_space.sample()
         else:
-            action = np.argmax(self.q.predict(state,verbose= self.verbose))
+            action = np.argmax(self.q(state))
         return action
 
     def learn(self):
@@ -104,7 +104,7 @@ class DQN():
         y = batch['rewards'] + gamma * np.max(self.q_target(batch['next_states']),axis=1)
         y_q = self.q.predict(batch['states'],verbose = 0)                                      # Predict Qs on all actions
         y_q[np.arange(len(y_q)).tolist(),batch['actions'].astype(int).tolist()]=y       # Change the values of the actual actions to target (y)
-        loss = self.q.fit(batch['states'],y_q, verbose = 0)                                            # loss != 0 only on actual actions takes
+        loss = self.q.fit(batch['states'],y_q, batch_size = self.batch_size, verbose = 0).history['loss']                                            # loss != 0 only on actual actions takes
         return loss
 
     def collect_batch(self, n_steps,epsilon =None, show_progress = False):
@@ -119,6 +119,8 @@ class DQN():
             action = self.get_action(np.expand_dims(state, 0),epsilon)
             next_state, reward, done, info = self.env.step(action)
             episode_steps +=1
+            # if done:
+            #     reward = -10
             self.replay_buffer.append([state, action, reward, next_state, done])
             if done:
                 state = self.env.reset()
@@ -135,18 +137,18 @@ class DQN():
         return ep_reward/episodes, sum(ep_lengths)/len(ep_lengths)
 
     def output_report(self):
-        f,ax = plt.subplots(2,1,figsize=(10,15))
-        ax[0].plot(self.rews)
-        ax[0].set_title('Average episode Reward')
-        ax[1].plot(self.lens)
-        ax[1].set_title('Average Episode Length')
+        f,ax = plt.subplots(1,1,figsize=(10,10))
+        ax.plot(self.rews)
+        ax.set_title('Average episode Reward')
+        # ax[1].plot(self.lens)
+        # ax[1].set_title('Average Episode Length')
         plt.savefig('progress.png')
         plt.close('all')
 
     def train(self, n_epochs):
-        initial_steps = max(self.min_steps_learn, self.batch_size)
+        # initial_steps = max(self.min_steps_learn, self.batch_size)
         print('collecting decorrelation steps')
-        avg_rew, avg_len = self.collect_batch(initial_steps,epsilon = 1, show_progress=True)
+        avg_rew, avg_len = self.collect_batch(self.min_steps_learn,epsilon = 1, show_progress=True)
         self.rews = [avg_rew]
         self.lens = [avg_len]
         self.output_report()
@@ -161,6 +163,7 @@ class DQN():
             self.lens.append(avg_len)
             if ep % self.report_interval == 0:
                 self.output_report()
+                # aaa=1
             if ep % self.target_update_interval:
                 self._update_target()
 
@@ -168,5 +171,5 @@ class DQN():
 if __name__ == '__main__':
     env = gym.make('CartPole-v1')
     dqn = DQN(env)
-    dqn.train(400)
+    dqn.train(500)
     
