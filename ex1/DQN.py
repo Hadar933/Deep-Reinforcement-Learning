@@ -42,11 +42,11 @@ class ExperienceReplay:
 class DQN():
 
     def __init__(
-                self, env : gym.Env, hidden_dims: List[int] = [4,4,4], lr : float = 0.01 , epsilon_bounds: list[float,float] = [0.5, 0.01], gamma : float = 0.99, 
-                learning_epochs: int = 1, batch_size : int = 128, target_update_interval: int =6, steps_per_epoch: int = 500, 
-                buffer_size : int =10000, min_steps_learn: int = 128, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
-                final_activation : str = 'softmax', optimizer_name: str = 'Adam' , loss_fn_name : str = 'mse', 
-                kernel_initializer: str = 'normal', report_interval = 1):
+                self, env : gym.Env, hidden_dims: List[int] = [8,32,16], lr : float = 0.1 , epsilon_bounds: list[float,float] = [0.5, 0.01], eps_decay_fraction: float = 0.1, gamma : float = 0.95, 
+                learning_epochs: int = 5, batch_size : int = 128, target_update_interval: int =40, steps_per_epoch: int = 128, 
+                buffer_size : int =1000, min_steps_learn: int = 1000, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
+                final_activation : str = 'linear', optimizer_name: str = 'Adam' , loss_fn_name : str = 'mse', 
+                kernel_initializer: str = 'uniform', report_interval = 1):
         assert optimizer_name in OPTIMIZERS.keys() ; "Unknown optimizer"
         self.env = env
         self.action_space   = env.action_space.n
@@ -57,6 +57,7 @@ class DQN():
         self.epsilon = epsilon_bounds[0]
         self.epsilons = []
         self.epsilon_bounds = epsilon_bounds
+        self.eps_decay_fraction = eps_decay_fraction
         self.gamma = gamma
         self.lr = lr
         self.min_steps_learn = min_steps_learn
@@ -90,7 +91,9 @@ class DQN():
 
     def _update_eps(self):
         # self.epsilon = 0.99 * self.epsilon
-        self.epsilon = self.epsilon_bounds[0]- (self.epsilon_bounds[0]-self.epsilon_bounds[1])*((self.epoch+1)/self.n_epochs)
+        if (self.epoch+1)/self.n_epochs < self.eps_decay_fraction:
+            final_decay_episode = int(self.n_epochs*self.eps_decay_fraction)
+            self.epsilon = self.epsilon_bounds[0]- (self.epsilon_bounds[0]-self.epsilon_bounds[1])*((self.epoch+1)/final_decay_episode)
         self.epsilons.append(self.epsilon)
 
     def get_action(self, state, epsilon = None):
@@ -118,20 +121,22 @@ class DQN():
         ep_reward=0
         if show_progress:
             pbar = tqdm(total=n_steps)
-        for step_num in range(n_steps):
+        for step_num in range(2*n_steps): # larger than n_steps to make sure we finish the episodes, but no too large so infinite episodes will not result in infinite loops
             action = self.get_action(np.expand_dims(state, 0),epsilon)
             next_state, reward, done, info = self.env.step(action)
+            if done:
+                reward = -10
             episode_steps +=1
-            # if done:
-            #     reward = -10
             self.replay_buffer.append([state, action, reward, next_state, done])
+            state = next_state
             if done:
                 state = self.env.reset()
                 episodes +=1
                 ep_lengths.append(episode_steps)
                 episode_steps = 0
+                if step_num >= n_steps:
+                    break
             ep_reward += reward
-            
             if show_progress and step_num % 10 == 0:
                 pbar.update(10)
         if show_progress:
@@ -178,5 +183,5 @@ class DQN():
 if __name__ == '__main__':
     env = gym.make('CartPole-v1')
     dqn = DQN(env)
-    dqn.train(500)
+    dqn.train(10000)
     
