@@ -42,11 +42,11 @@ class ExperienceReplay:
 class DQN():
 
     def __init__(
-                self, env : gym.Env, hidden_dims: List[int] = [8,32], lr : float = 0.001 , epsilon_bounds: list[float,float] = [0.3, 0.01], gamma : float = 0.95, 
-                learning_epochs: int = 5, batch_size : int = 32, target_update_interval: int =10, steps_per_epoch: int = 256, 
-                buffer_size : int =5000, min_steps_learn: int = 0, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
-                final_activation : str = 'linear', optimizer_name: str = 'RMSprop' , loss_fn_name : str = 'mse', 
-                kernel_initializer: str = 'glorot_uniform', report_interval = 1):
+                self, env : gym.Env, hidden_dims: List[int] = [4,4,4], lr : float = 0.01 , epsilon_bounds: list[float,float] = [0.5, 0.01], gamma : float = 0.99, 
+                learning_epochs: int = 1, batch_size : int = 128, target_update_interval: int =6, steps_per_epoch: int = 500, 
+                buffer_size : int =10000, min_steps_learn: int = 128, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
+                final_activation : str = 'softmax', optimizer_name: str = 'Adam' , loss_fn_name : str = 'mse', 
+                kernel_initializer: str = 'normal', report_interval = 1):
         assert optimizer_name in OPTIMIZERS.keys() ; "Unknown optimizer"
         self.env = env
         self.action_space   = env.action_space.n
@@ -55,6 +55,7 @@ class DQN():
         self.hidden_dims = hidden_dims
         self.target_update_interval = target_update_interval
         self.epsilon = epsilon_bounds[0]
+        self.epsilons = []
         self.epsilon_bounds = epsilon_bounds
         self.gamma = gamma
         self.lr = lr
@@ -71,6 +72,7 @@ class DQN():
         self.replay_buffer = ExperienceReplay(buffer_size)
         self.q = self._build_model()
         self.q_target = self._build_model()
+        self.q_updates = []
 
 
 
@@ -87,8 +89,9 @@ class DQN():
         self.q_target.set_weights(self.q.get_weights())
 
     def _update_eps(self):
+        # self.epsilon = 0.99 * self.epsilon
         self.epsilon = self.epsilon_bounds[0]- (self.epsilon_bounds[0]-self.epsilon_bounds[1])*((self.epoch+1)/self.n_epochs)
-        print(self.epsilon)
+        self.epsilons.append(self.epsilon)
 
     def get_action(self, state, epsilon = None):
         epsilon  = self.epsilon if epsilon is None else epsilon
@@ -102,7 +105,7 @@ class DQN():
         batch = self.replay_buffer.sample(self.batch_size)
         gamma = (1 - batch['dones']) * self.gamma
         y = batch['rewards'] + gamma * np.max(self.q_target(batch['next_states']),axis=1)
-        y_q = self.q.predict(batch['states'],verbose = 0)                                      # Predict Qs on all actions
+        y_q = self.q(batch['states']).numpy()                                     # Predict Qs on all actions
         y_q[np.arange(len(y_q)).tolist(),batch['actions'].astype(int).tolist()]=y       # Change the values of the actual actions to target (y)
         loss = self.q.fit(batch['states'],y_q, batch_size = self.batch_size, verbose = 0).history['loss']                                            # loss != 0 only on actual actions takes
         return loss
@@ -137,11 +140,14 @@ class DQN():
         return ep_reward/episodes, sum(ep_lengths)/len(ep_lengths)
 
     def output_report(self):
-        f,ax = plt.subplots(1,1,figsize=(10,10))
-        ax.plot(self.rews)
-        ax.set_title('Average episode Reward')
-        # ax[1].plot(self.lens)
-        # ax[1].set_title('Average Episode Length')
+        f,ax = plt.subplots(2,2,figsize=(10,10))
+        ax=ax.ravel()
+        ax[0].plot(self.rews)
+        ax[0].set_title('Average episode Reward')
+        ax[1].plot(self.losses)
+        ax[1].set_title('Training Loss')
+        ax[2].plot(self.epsilons)
+        ax[2].set_title('Epsilon')
         plt.savefig('progress.png')
         plt.close('all')
 
@@ -151,6 +157,7 @@ class DQN():
         avg_rew, avg_len = self.collect_batch(self.min_steps_learn,epsilon = 1, show_progress=True)
         self.rews = [avg_rew]
         self.lens = [avg_len]
+        self.losses = []
         self.output_report()
         self.n_epochs = n_epochs
         print(f'Training for {n_epochs} epochs')
@@ -158,13 +165,13 @@ class DQN():
             self.epoch = ep
             self._update_eps()
             avg_rew, avg_len = self.collect_batch(self.steps_per_epoch)
-            self.learn()
+            loss = self.learn()
             self.rews.append(avg_rew)
             self.lens.append(avg_len)
+            self.losses.append(loss)
             if ep % self.report_interval == 0:
                 self.output_report()
-                # aaa=1
-            if ep % self.target_update_interval:
+            if ep % self.target_update_interval==0:
                 self._update_target()
 
 
