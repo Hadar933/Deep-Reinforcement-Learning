@@ -1,8 +1,8 @@
 import random
 import gym
 from keras.models import Sequential
-from keras.layers import Dense
-from keras.optimizers import Adam, RMSprop
+from keras.layers import Dense, Dropout, BatchNormalization
+from keras.optimizers import Adam, RMSprop, SGD
 from collections import deque
 from typing import Tuple, List, Union
 from tqdm import tqdm
@@ -13,7 +13,8 @@ import Config
 
 OPTIMIZERS={
     'Adam': Adam,
-    'RMSprop': RMSprop
+    'RMSprop': RMSprop,
+    'SGD': SGD
 }
 
 
@@ -42,11 +43,11 @@ class ExperienceReplay:
 class DQN():
 
     def __init__(
-                self, env : gym.Env, hidden_dims: List[int] = [8,32,16], lr : float = 0.1 , epsilon_bounds: list[float,float] = [0.5, 0.01], eps_decay_fraction: float = 0.1, gamma : float = 0.95, 
-                learning_epochs: int = 5, batch_size : int = 128, target_update_interval: int =40, steps_per_epoch: int = 128, 
-                buffer_size : int =1000, min_steps_learn: int = 1000, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
-                final_activation : str = 'linear', optimizer_name: str = 'Adam' , loss_fn_name : str = 'mse', 
-                kernel_initializer: str = 'uniform', report_interval = 1):
+                self, env : gym.Env, hidden_dims: List[int] = [16,16,16], lr : float = 0.01 , epsilon_bounds: list[float,float] = [1.0, 0.01], eps_decay_fraction: float = 0.1, gamma : float = 0.95, 
+                learning_epochs: int = 10, batch_size : int = 128, target_update_interval: int =50, steps_per_epoch: int = 500, 
+                buffer_size : int =10000, min_steps_learn: int = 10000, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
+                final_activation : str = 'relu', optimizer_name: str = 'SGD' , loss_fn_name : str = 'mse', dropout: float = 0.1, batch_norm: bool = True,
+                kernel_initializer: str = 'he_normal', report_interval = 1, save_interval:int = 500):
         assert optimizer_name in OPTIMIZERS.keys() ; "Unknown optimizer"
         self.env = env
         self.action_space   = env.action_space.n
@@ -71,8 +72,12 @@ class DQN():
         self.batch_size = batch_size
         self.report_interval = report_interval
         self.replay_buffer = ExperienceReplay(buffer_size)
+        self.save_interval = save_interval
+        self.dropout = dropout
+        self.bn = batch_norm
         self.q = self._build_model()
         self.q_target = self._build_model()
+
         self.q_updates = []
 
 
@@ -82,10 +87,17 @@ class DQN():
         net.add(Dense(self.hidden_dims[0], input_dim=self.state_space, activation=self.inner_act))
         for next_dim in self.hidden_dims[1:]:
             net.add(Dense(next_dim, activation=self.inner_act, kernel_initializer=self.kernel_initializer))
+            net.add(Dropout(rate= self.dropout))
+            if self.bn:
+                net.add(BatchNormalization())
         net.add(Dense(self.env.action_space.n, activation=self.final_activation, kernel_initializer=self.kernel_initializer))
         net.compile(loss=self.loss_fn_name, optimizer=OPTIMIZERS[self.optimizer_name]())
         return net
     
+    def _save_model(self):
+        self.q.save('q_model')
+
+
     def _update_target(self):
         self.q_target.set_weights(self.q.get_weights())
 
@@ -125,7 +137,7 @@ class DQN():
             action = self.get_action(np.expand_dims(state, 0),epsilon)
             next_state, reward, done, info = self.env.step(action)
             if done:
-                reward = -10
+                reward = -1
             episode_steps +=1
             self.replay_buffer.append([state, action, reward, next_state, done])
             state = next_state
@@ -178,6 +190,8 @@ class DQN():
                 self.output_report()
             if ep % self.target_update_interval==0:
                 self._update_target()
+            if ep % self.save_interval ==0:
+                self._save_model()
 
 
 if __name__ == '__main__':
