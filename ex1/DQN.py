@@ -1,8 +1,11 @@
 import random
 import gym
+import datetime
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, BatchNormalization
 from keras.optimizers import Adam, RMSprop, SGD
+import tensorflow as tf
+
 from collections import deque
 from typing import Tuple, List, Union
 from tqdm import tqdm
@@ -43,10 +46,10 @@ class ExperienceReplay:
 class DQN():
 
     def __init__(
-                self, env : gym.Env, hidden_dims: List[int] = [16,16,16], lr : float = 0.01 , epsilon_bounds: list[float,float] = [1.0, 0.01], eps_decay_fraction: float = 0.1, gamma : float = 0.95, 
-                learning_epochs: int = 10, batch_size : int = 128, target_update_interval: int =50, steps_per_epoch: int = 500, 
+                self, env : gym.Env, hidden_dims: List[int] = [32,32,32], lr : float = 0.001 , epsilon_bounds: list[float,float] = [1.0, 0.01], eps_decay_fraction: float = 0.1, gamma : float = 0.95, 
+                learning_epochs: int = 5, batch_size : int = 32, target_update_interval: int =50, steps_per_epoch: int = 500, 
                 buffer_size : int =10000, min_steps_learn: int = 10000, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
-                final_activation : str = 'relu', optimizer_name: str = 'SGD' , loss_fn_name : str = 'mse', dropout: float = 0.1, batch_norm: bool = True,
+                final_activation : str = 'relu', optimizer_name: str = 'SGD' , loss_fn_name : str = 'mse', dropout: float = 0.1, batch_norm: bool = False,
                 kernel_initializer: str = 'he_normal', report_interval = 1, save_interval:int = 500):
         assert optimizer_name in OPTIMIZERS.keys() ; "Unknown optimizer"
         self.env = env
@@ -77,6 +80,10 @@ class DQN():
         self.bn = batch_norm
         self.q = self._build_model()
         self.q_target = self._build_model()
+        self._setup_tensorboard()
+
+        self.ckpt = tf.train.Checkpoint(step = tf.Variable(1),q = self.q,target = self.q_target)
+        self.ckpt_mgr = tf.train.CheckpointManager(self.ckpt, './tf_ckpts', max_to_keep=3)
 
         self.q_updates = []
 
@@ -95,8 +102,12 @@ class DQN():
         return net
     
     def _save_model(self):
-        self.q.save('q_model')
+        self.ckpt_mgr.save()
 
+    def _setup_tensorboard(self):
+        current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        train_log_dir = 'logs/gradient_tape/' + current_time + '/train'
+        self.summary_writer = tf.summary.create_file_writer(train_log_dir)
 
     def _update_target(self):
         self.q_target.set_weights(self.q.get_weights())
@@ -170,6 +181,7 @@ class DQN():
 
     def train(self, n_epochs):
         # initial_steps = max(self.min_steps_learn, self.batch_size)
+        self.ckpt.step.assign_add(1)
         print('collecting decorrelation steps')
         avg_rew, avg_len = self.collect_batch(self.min_steps_learn,epsilon = 1, show_progress=True)
         self.rews = [avg_rew]
@@ -186,8 +198,11 @@ class DQN():
             self.rews.append(avg_rew)
             self.lens.append(avg_len)
             self.losses.append(loss)
-            if ep % self.report_interval == 0:
-                self.output_report()
+            with self.summary_writer.as_default():
+                tf.summary.scalar('loss', loss[0], step=ep)
+                tf.summary.scalar('Avg_reward', avg_rew, step=ep)
+                tf.summary.scalar('Avg_len', avg_len, step=ep)
+                tf.summary.scalar('Epsilon', self.epsilon, step=ep)
             if ep % self.target_update_interval==0:
                 self._update_target()
             if ep % self.save_interval ==0:
