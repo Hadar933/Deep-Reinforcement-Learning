@@ -12,7 +12,8 @@ from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 import Config
-
+import argparse
+import inspect
 
 OPTIMIZERS={
     'Adam': Adam,
@@ -50,7 +51,7 @@ class DQN():
                 learning_epochs: int = 5, batch_size : int = 32, target_update_interval: int =50, steps_per_epoch: int = 500, 
                 buffer_size : int =10000, min_steps_learn: int = 10000, inner_activation: str = 'relu', verbose : Union[str,int] = 0, 
                 final_activation : str = 'relu', optimizer_name: str = 'SGD' , loss_fn_name : str = 'mse', dropout: float = 0.1, batch_norm: bool = False,
-                kernel_initializer: str = 'he_normal', report_interval = 1, save_interval:int = 500):
+                kernel_initializer: str = 'he_normal', report_interval: int = 1, save_interval:int = 500):
         assert optimizer_name in OPTIMIZERS.keys() ; "Unknown optimizer"
         self.env = env
         self.action_space   = env.action_space.n
@@ -209,7 +210,19 @@ class DQN():
                 self._save_model()
 
 
+def parse_args():
+    fn_args = inspect.get_annotations(DQN.__init__)
+    signature = inspect.signature(DQN.__init__)
+
+    args = {k: (fn_args[k], v.default) for k, v in signature.parameters.items() if v.default is not inspect.Parameter.empty}
+    parser = argparse.ArgumentParser(description='DQN implementation in TF baaaaa')
+
+    for arg in args.keys():
+        parser.add_argument(f'--{arg}',type=args[arg][0], default=args[arg][1], required=False)
+    args = vars(parser.parse_args())
+
 if __name__ == '__main__':
+    parse_args()
     env = gym.make('CartPole-v1')
     dqn = DQN(env)
     dqn.train(10000)
