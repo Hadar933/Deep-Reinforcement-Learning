@@ -57,8 +57,7 @@ class DQN():
             final_activation: str = 'relu', optimizer_name: str = 'SGD', loss_fn_name: str = 'mse',
             dropout: float = 0.1, batch_norm: bool = False,
             kernel_initializer: str = 'he_normal', report_interval: int = 1, save_interval: int = 500):
-        assert optimizer_name in OPTIMIZERS.keys();
-        "Unknown optimizer"
+        assert optimizer_name in OPTIMIZERS.keys(), "Unknown optimizer"
         self.env = env
         self.action_space = env.action_space.n
         self.state_space = env.observation_space.shape[0]
