@@ -6,7 +6,7 @@ from keras.models import Sequential
 from keras.layers import Dense, Dropout, BatchNormalization
 from keras.optimizers import Adam, RMSprop, SGD
 import tensorflow as tf
-import sys
+
 from collections import deque
 from typing import Tuple, List, Union
 from tqdm import tqdm
@@ -14,6 +14,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 import inspect
+import json
 
 OPTIMIZERS = {
     'Adam': Adam,
@@ -45,12 +46,12 @@ class ExperienceReplay:
         return self._exp_rep.__len__()
 
 
-class DQN:
 
+class DQN():
     def __init__(
-            self, env: gym.Env, double_dqn: bool = False, hidden_dims: List[int] = [32, 32, 32], lr: float = 0.001,
-            epsilon_bounds: List[float] = [1.0, 0.05], eps_decay_fraction: float = 0.2, gamma: float = 0.95,
-            learning_epochs: int = 10, batch_size: int = 128, target_update_interval: int = 50,
+            self, env: gym.Env, double_dqn: bool = False, hidden_dims: List[int] = [32, 32, 32], lr: float = 0.001, min_lr:float = 0.0001, lr_decay:float = 0.999,
+            epsilon_bounds: list[float, float] = [1.0, 0.05], eps_decay_fraction: float = 0.2, gamma: float = 0.999,
+            learning_epochs: int = 30, batch_size: int = 128, target_update_interval: int = 10,
             steps_per_epoch: int = 2000,
             buffer_size: int = 10000, min_steps_learn: int = 10000, inner_activation: str = 'relu',
             verbose: Union[str, int] = 0,
@@ -71,6 +72,8 @@ class DQN:
         self.eps_decay_fraction = eps_decay_fraction
         self.gamma = gamma
         self.lr = lr
+        self.min_lr = min_lr
+        self.lr_decay = lr_decay
         self.min_steps_learn = min_steps_learn
         self.inner_act = inner_activation
         self.final_activation = final_activation
@@ -89,6 +92,12 @@ class DQN:
         self.q_target = self._build_model()
         self.train_log_dir = self._setup_tensorboard()
         self.opt_init_states = [var.value() for var in self.q.optimizer.variables()]
+        m_args = locals().copy()
+        m_args.pop('self')
+        m_args.pop('env')
+        with open(path.join(self.train_log_dir, 'params.json'), 'w') as f:
+            f.write(json.dumps(m_args,indent=4))
+
 
         self.ckpt = tf.train.Checkpoint(step=tf.Variable(1), q=self.q, target=self.q_target)
         self.ckpt_mgr = tf.train.CheckpointManager(self.ckpt, path.join(self.train_log_dir, 'tf_ckpts'), max_to_keep=3)
@@ -105,7 +114,7 @@ class DQN:
                 net.add(BatchNormalization())
         net.add(Dense(self.env.action_space.n, activation=self.final_activation,
                       kernel_initializer=self.kernel_initializer))
-        net.compile(loss=self.loss_fn_name, optimizer=OPTIMIZERS[self.optimizer_name]())
+        net.compile(loss=self.loss_fn_name, optimizer=OPTIMIZERS[self.optimizer_name](self.lr))
         return net
 
     def _save_model(self):
@@ -121,14 +130,19 @@ class DQN:
         self.q_target.set_weights(self.q.get_weights())
         for val, var in zip(self.opt_init_states, self.q.optimizer.variables()):
             var.assign(val)
-
+        self.q.optimizer.learning_rate = self.lr
+        assert np.allclose(self.q.optimizer.lr.numpy(),self.lr)
+        
+    
     def _update_eps(self):
         # self.epsilon = 0.99 * self.epsilon
         if (self.epoch + 1) / self.n_epochs < self.eps_decay_fraction:
             final_decay_episode = int(self.n_epochs * self.eps_decay_fraction)
             self.epsilon = self.epsilon_bounds[0] - (self.epsilon_bounds[0] - self.epsilon_bounds[1]) * (
                     (self.epoch + 1) / final_decay_episode)
-        self.epsilons.append(self.epsilon)
+        if self.lr > self.min_lr:
+            self.lr*= self.lr_decay
+
 
     def get_action(self, state, epsilon=None):
         epsilon = self.epsilon if epsilon is None else epsilon
@@ -200,14 +214,9 @@ class DQN:
         plt.close('all')
 
     def train(self, n_epochs):
-        # initial_steps = max(self.min_steps_learn, self.batch_size)
         self.ckpt.step.assign_add(1)
         print('collecting decorrelation steps')
         avg_rew, avg_len = self.collect_batch(self.min_steps_learn, epsilon=1, show_progress=True)
-        # self.rews = [avg_rew]
-        # self.lens = [avg_len]
-        # self.losses = []
-        # self.output_report()
         self.n_epochs = n_epochs
         print(f'Training for {n_epochs} epochs')
         for ep in tqdm(range(n_epochs)):
@@ -215,14 +224,12 @@ class DQN:
             self._update_eps()
             avg_rew, avg_len = self.collect_batch(self.steps_per_epoch)
             loss = self.learn()
-            # self.rews.append(avg_rew)
-            # self.lens.append(avg_len)
-            # self.losses.append(loss)
             with self.summary_writer.as_default():
                 tf.summary.scalar('loss', loss[0], step=ep)
                 tf.summary.scalar('Avg_reward', avg_rew, step=ep)
                 tf.summary.scalar('Avg_len', avg_len, step=ep)
                 tf.summary.scalar('Epsilon', self.epsilon, step=ep)
+                tf.summary.scalar('Learning_rate', self.lr, step=ep)
             if ep % self.target_update_interval == 0:
                 self._update_target()
             if ep % self.save_interval == 0:
@@ -240,13 +247,15 @@ def parse_args():
     for arg in args.keys():
         parser.add_argument(f'--{arg}', type=args[arg][0], default=args[arg][1], required=False)
     args = vars(parser.parse_args())
+    return(args)
 
 
 if __name__ == '__main__':
-    # parse_args()  # for some reason colab doesn't like this function
+
+    args = parse_args(args=[])
     env = gym.make('CartPole-v1')
     device = tf.test.gpu_device_name() if len(tf.config.list_physical_devices('GPU')) > 0 else '/device:CPU:0'
     with tf.device(device):
         print(f"Device: {device}")
-        dqn = DQN(env, double_dqn=True)
+        dqn = DQN(env,**args)
         dqn.train(10000)
