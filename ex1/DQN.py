@@ -1,4 +1,5 @@
 import random
+from os import path
 import gym
 import datetime
 from keras.models import Sequential
@@ -48,9 +49,9 @@ class DQN():
 
     def __init__(
             self, env: gym.Env, hidden_dims: List[int] = [32, 32, 32], lr: float = 0.001,
-            epsilon_bounds: list[float, float] = [1.0, 0.01], eps_decay_fraction: float = 0.1, gamma: float = 0.95,
-            learning_epochs: int = 5, batch_size: int = 32, target_update_interval: int = 50,
-            steps_per_epoch: int = 500,
+            epsilon_bounds: list[float, float] = [1.0, 0.05], eps_decay_fraction: float = 0.2, gamma: float = 0.95,
+            learning_epochs: int = 10, batch_size: int = 128, target_update_interval: int = 50,
+            steps_per_epoch: int = 2000,
             buffer_size: int = 10000, min_steps_learn: int = 10000, inner_activation: str = 'relu',
             verbose: Union[str, int] = 0,
             final_activation: str = 'relu', optimizer_name: str = 'SGD', loss_fn_name: str = 'mse',
@@ -86,10 +87,11 @@ class DQN():
         self.bn = batch_norm
         self.q = self._build_model()
         self.q_target = self._build_model()
-        self._setup_tensorboard()
+        self.train_log_dir = self._setup_tensorboard()
+        self.opt_init_states = [var.value() for var in self.q.optimizer.variables()]
 
         self.ckpt = tf.train.Checkpoint(step=tf.Variable(1), q=self.q, target=self.q_target)
-        self.ckpt_mgr = tf.train.CheckpointManager(self.ckpt, './tf_ckpts', max_to_keep=3)
+        self.ckpt_mgr = tf.train.CheckpointManager(self.ckpt, path.join(self.train_log_dir,'tf_ckpts'), max_to_keep=3)
 
         self.q_updates = []
 
@@ -113,9 +115,12 @@ class DQN():
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         train_log_dir = 'logs/gradient_tape/' + current_time + '/train'
         self.summary_writer = tf.summary.create_file_writer(train_log_dir)
+        return train_log_dir
 
     def _update_target(self):
         self.q_target.set_weights(self.q.get_weights())
+        for val,var in zip(self.opt_init_states ,self.q.optimizer.variables()): 
+            var.assign(val)
 
     def _update_eps(self):
         # self.epsilon = 0.99 * self.epsilon
@@ -193,9 +198,9 @@ class DQN():
         self.ckpt.step.assign_add(1)
         print('collecting decorrelation steps')
         avg_rew, avg_len = self.collect_batch(self.min_steps_learn, epsilon=1, show_progress=True)
-        self.rews = [avg_rew]
-        self.lens = [avg_len]
-        self.losses = []
+        # self.rews = [avg_rew]
+        # self.lens = [avg_len]
+        # self.losses = []
         # self.output_report()
         self.n_epochs = n_epochs
         print(f'Training for {n_epochs} epochs')
@@ -204,9 +209,9 @@ class DQN():
             self._update_eps()
             avg_rew, avg_len = self.collect_batch(self.steps_per_epoch)
             loss = self.learn()
-            self.rews.append(avg_rew)
-            self.lens.append(avg_len)
-            self.losses.append(loss)
+            # self.rews.append(avg_rew)
+            # self.lens.append(avg_len)
+            # self.losses.append(loss)
             with self.summary_writer.as_default():
                 tf.summary.scalar('loss', loss[0], step=ep)
                 tf.summary.scalar('Avg_reward', avg_rew, step=ep)
