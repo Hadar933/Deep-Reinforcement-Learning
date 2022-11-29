@@ -45,7 +45,7 @@ class ExperienceReplay:
         return self._exp_rep.__len__()
 
 
-class DQN():
+class DQN:
 
     def __init__(
             self, env: gym.Env, hidden_dims: List[int] = [32, 32, 32], lr: float = 0.001,
@@ -90,7 +90,7 @@ class DQN():
         self.opt_init_states = [var.value() for var in self.q.optimizer.variables()]
 
         self.ckpt = tf.train.Checkpoint(step=tf.Variable(1), q=self.q, target=self.q_target)
-        self.ckpt_mgr = tf.train.CheckpointManager(self.ckpt, path.join(self.train_log_dir,'tf_ckpts'), max_to_keep=3)
+        self.ckpt_mgr = tf.train.CheckpointManager(self.ckpt, path.join(self.train_log_dir, 'tf_ckpts'), max_to_keep=3)
 
         self.q_updates = []
 
@@ -118,7 +118,7 @@ class DQN():
 
     def _update_target(self):
         self.q_target.set_weights(self.q.get_weights())
-        for val,var in zip(self.opt_init_states ,self.q.optimizer.variables()): 
+        for val, var in zip(self.opt_init_states, self.q.optimizer.variables()):
             var.assign(val)
 
     def _update_eps(self):
@@ -238,5 +238,8 @@ def parse_args():
 if __name__ == '__main__':
     parse_args()
     env = gym.make('CartPole-v1')
-    dqn = DQN(env)
-    dqn.train(10000)
+    device = tf.test.gpu_device_name() if len(tf.config.list_physical_devices('GPU')) > 0 else '/device:CPU:0'
+    with tf.device(device):
+        print(f"Device: {device}")
+        dqn = DQN(env, hidden_dims=[6, 6, 6])
+        dqn.train(10000)
