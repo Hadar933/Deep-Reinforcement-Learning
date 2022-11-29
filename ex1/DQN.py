@@ -48,7 +48,7 @@ class ExperienceReplay:
 class DQN:
 
     def __init__(
-            self, env: gym.Env, hidden_dims: List[int] = [32, 32, 32], lr: float = 0.001,
+            self, env: gym.Env, double_dqn: bool = False, hidden_dims: List[int] = [32, 32, 32], lr: float = 0.001,
             epsilon_bounds: List[float] = [1.0, 0.05], eps_decay_fraction: float = 0.2, gamma: float = 0.95,
             learning_epochs: int = 10, batch_size: int = 128, target_update_interval: int = 50,
             steps_per_epoch: int = 2000,
@@ -59,6 +59,7 @@ class DQN:
             kernel_initializer: str = 'he_normal', report_interval: int = 1, save_interval: int = 500):
         assert optimizer_name in OPTIMIZERS.keys(), "Unknown optimizer"
         self.env = env
+        self.double_dqn = double_dqn
         self.action_space = env.action_space.n
         self.state_space = env.observation_space.shape[0]
         self.steps_per_epoch = steps_per_epoch
@@ -140,7 +141,13 @@ class DQN:
     def learn(self):
         batch = self.replay_buffer.sample(self.batch_size)
         gamma = (1 - batch['dones']) * self.gamma
-        y = batch['rewards'] + gamma * np.max(self.q_target(batch['next_states']), axis=1)
+        if self.double_dqn:
+            decoupled_action = np.argmax(self.q(batch['next_states']), axis=1)
+            y = batch['rewards'] + gamma * tf.gather(params=self.q_target(batch['next_states']),
+                                                     indices=decoupled_action,
+                                                     batch_dims=1)
+        else:
+            y = batch['rewards'] + gamma * np.max(self.q_target(batch['next_states']), axis=1)
         y_q = self.q(batch['states']).numpy()  # Predict Qs on all actions
         y_q[np.arange(len(y_q)).tolist(), batch['actions'].astype(
             int).tolist()] = y  # Change the values of the actual actions to target (y)
@@ -241,5 +248,5 @@ if __name__ == '__main__':
     device = tf.test.gpu_device_name() if len(tf.config.list_physical_devices('GPU')) > 0 else '/device:CPU:0'
     with tf.device(device):
         print(f"Device: {device}")
-        dqn = DQN(env, hidden_dims=[6, 6, 6])
+        dqn = DQN(env, double_dqn=True)
         dqn.train(10000)
