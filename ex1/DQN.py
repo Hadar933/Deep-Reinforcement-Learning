@@ -237,7 +237,8 @@ def parse_args():
 
 if __name__ == '__main__':
     in_colab = 'google.colab' in sys.modules
-    if not in_colab: parse_args() # for some reason colab doesn't like this function
+    print(f"In colab: {in_colab}")
+    if not in_colab: parse_args()  # for some reason colab doesn't like this function
     env = gym.make('CartPole-v1')
     device = tf.test.gpu_device_name() if len(tf.config.list_physical_devices('GPU')) > 0 else '/device:CPU:0'
     with tf.device(device):
