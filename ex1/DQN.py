@@ -49,7 +49,7 @@ class DQN:
 
     def __init__(
             self, env: gym.Env, hidden_dims: List[int] = [32, 32, 32], lr: float = 0.001,
-            epsilon_bounds: list[float, float] = [1.0, 0.05], eps_decay_fraction: float = 0.2, gamma: float = 0.95,
+            epsilon_bounds: List[float] = [1.0, 0.05], eps_decay_fraction: float = 0.2, gamma: float = 0.95,
             learning_epochs: int = 10, batch_size: int = 128, target_update_interval: int = 50,
             steps_per_epoch: int = 2000,
             buffer_size: int = 10000, min_steps_learn: int = 10000, inner_activation: str = 'relu',
