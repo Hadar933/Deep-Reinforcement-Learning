@@ -6,7 +6,7 @@ from keras.models import Sequential
 from keras.layers import Dense, Dropout, BatchNormalization
 from keras.optimizers import Adam, RMSprop, SGD
 import tensorflow as tf
-
+import sys
 from collections import deque
 from typing import Tuple, List, Union
 from tqdm import tqdm
@@ -236,7 +236,8 @@ def parse_args():
 
 
 if __name__ == '__main__':
-    parse_args()
+    in_colab = 'google.colab' in sys.modules
+    if not in_colab: parse_args() # for some reason colab doesn't like this function
     env = gym.make('CartPole-v1')
     device = tf.test.gpu_device_name() if len(tf.config.list_physical_devices('GPU')) > 0 else '/device:CPU:0'
     with tf.device(device):
