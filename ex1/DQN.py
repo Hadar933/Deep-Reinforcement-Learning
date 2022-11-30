@@ -97,6 +97,8 @@ class DQN():
         m_args.pop('env')
         with open(path.join(self.train_log_dir, 'params.json'), 'w') as f:
             f.write(json.dumps(m_args,indent=4))
+        
+        self.running_rews = deque([],maxlen=100)
 
 
         self.ckpt = tf.train.Checkpoint(step=tf.Variable(1), q=self.q, target=self.q_target)
@@ -205,6 +207,24 @@ class DQN():
         ep_lengths.append(episode_steps)
         return ep_reward / episodes, sum(ep_lengths) / len(ep_lengths)
 
+    def evaluate(self, n_ep = 5):
+        rewards = []
+        ep_lengths = []
+        for _ in range(n_ep):
+            episode_steps = 0
+            rewards.append(0)
+            state = env.reset()
+            for step_num in range(500):
+                action = np.argmax(self.q(np.expand_dims(state, 0)))
+                next_state, reward, done, info = env.step(action)
+                rewards[-1]+=1
+                if done:
+                    ep_lengths.append(episode_steps)
+                    break
+                state = next_state
+                episode_steps += 1
+        return(rewards,ep_lengths)
+
     def output_report(self):
         fig, ax = plt.subplots(2, 2, figsize=(10, 10))
         ax = ax.ravel()
@@ -226,19 +246,26 @@ class DQN():
         for ep in tqdm(range(n_epochs)):
             self.epoch = ep
             self._update_eps()
-            avg_rew, avg_len = self.collect_batch(self.steps_per_epoch)
+            _, _ = self.collect_batch(self.steps_per_epoch)
             loss = self.learn()
             if ep % self.report_interval == 0:
+                rews,lengths = self.evaluate()
+                self.running_rews.extend(rews)
                 with self.summary_writer.as_default():
                     tf.summary.scalar('loss', loss[0], step=ep)
-                    tf.summary.scalar('Avg_reward', avg_rew, step=ep)
-                    tf.summary.scalar('Avg_len', avg_len, step=ep)
+                    tf.summary.scalar('Avg_reward', np.mean(rews), step=ep)
+                    tf.summary.scalar('Avg_len', np.mean(lengths), step=ep)
+                    tf.summary.scalar('Running_Avg_Rew', np.mean(self.running_rews), step=ep)
                     tf.summary.scalar('Epsilon', self.epsilon, step=ep)
                     tf.summary.scalar('Learning_rate', self.q.optimizer.lr.numpy(), step=ep)
             if ep % self.target_update_interval == 0:
                 self._update_target()
             if ep % self.save_interval == 0:
                 self._save_model()
+            if np.mean(self.running_rews) > 450:
+                self._save_model()
+                print('Reached Target!!!!')
+                break
 
 
 def parse_args():
@@ -257,8 +284,8 @@ def parse_args():
 
 if __name__ == '__main__':
 
-    args = parse_args(args=[])
-    # args = parse_args()
+    # args = parse_args(args=[])
+    args = parse_args()
     env = gym.make('CartPole-v1')
     device = tf.test.gpu_device_name() if len(tf.config.list_physical_devices('GPU')) > 0 else '/device:CPU:0'
     with tf.device(device):
