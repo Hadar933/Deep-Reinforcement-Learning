@@ -171,7 +171,7 @@ class DQN():
 
     def collect_batch(self, n_steps, epsilon=None, show_progress=False):
         ep_lengths = []
-        episodes = 1
+        episodes = 0
         episode_steps = 0
         state = self.env.reset()
         ep_reward = 0
