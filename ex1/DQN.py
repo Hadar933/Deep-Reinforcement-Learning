@@ -49,15 +49,15 @@ class ExperienceReplay:
 
 class DQN():
     def __init__(
-            self, env: gym.Env, double_dqn: bool = False, hidden_dims: List[int] = [32, 32, 32], lr: float = 0.001, min_lr:float = 0.0001, lr_decay:float = 0.999,
-            epsilon_bounds: list[float, float] = [1.0, 0.05], eps_decay_fraction: float = 0.2, gamma: float = 0.999,
-            learning_epochs: int = 30, batch_size: int = 128, target_update_interval: int = 10,
-            steps_per_epoch: int = 2000,
-            buffer_size: int = 10000, min_steps_learn: int = 10000, inner_activation: str = 'relu',
+            self, env: gym.Env, double_dqn: bool = False, hidden_dims: List[int] = [16, 32, 32, 16, 16], lr: float = 0.01, min_lr:float = 0.001, lr_decay:float = 0.999,
+            epsilon_bounds: list[float, float] = [1.0, 0.2], eps_decay_fraction: float = 0.25, gamma: float = 0.9999,
+            learning_epochs: int = 16, batch_size: int = 128, target_update_interval: int = 16,
+            steps_per_epoch: int = 128,
+            buffer_size: int = 2048, min_steps_learn: int = 2048, inner_activation: str = 'relu',
             verbose: Union[str, int] = 0,
-            final_activation: str = 'relu', optimizer_name: str = 'SGD', loss_fn_name: str = 'mse',
+            final_activation: str = 'relu', optimizer_name: str = 'Adam', loss_fn_name: str = 'mse',
             dropout: float = 0.1, batch_norm: bool = False,
-            kernel_initializer: str = 'he_normal', report_interval: int = 1, save_interval: int = 500):
+            kernel_initializer: str = 'he_normal', report_interval: int = 5, save_interval: int = 200):
         assert optimizer_name in OPTIMIZERS.keys(), "Unknown optimizer"
         self.env = env
         self.double_dqn = double_dqn
@@ -178,13 +178,17 @@ class DQN():
         if show_progress:
             pbar = tqdm(total=n_steps)
         for step_num in range(
-                2 * n_steps):  # larger than n_steps to make sure we finish the episodes, but no too large so infinite episodes will not result in infinite loops
+                10000):  # larger than n_steps to make sure we finish the episodes, but no too large so infinite episodes will not result in infinite loops
             action = self.get_action(np.expand_dims(state, 0), epsilon)
             next_state, reward, done, info = self.env.step(action)
             if done:
-                reward = -1
+                # This will throw a warning, but it is the only way to know if the episode was truncated or terminated
+                _, tmp_reward, _, _ = env.step(env.action_space.sample())
+                if tmp_reward < 1.0:
+                    reward = -10
             episode_steps += 1
             self.replay_buffer.append([state, action, reward, next_state, done])
+            assert len(self.replay_buffer) <= self.replay_buffer.size
             state = next_state
             if done:
                 state = self.env.reset()
@@ -224,12 +228,13 @@ class DQN():
             self._update_eps()
             avg_rew, avg_len = self.collect_batch(self.steps_per_epoch)
             loss = self.learn()
-            with self.summary_writer.as_default():
-                tf.summary.scalar('loss', loss[0], step=ep)
-                tf.summary.scalar('Avg_reward', avg_rew, step=ep)
-                tf.summary.scalar('Avg_len', avg_len, step=ep)
-                tf.summary.scalar('Epsilon', self.epsilon, step=ep)
-                tf.summary.scalar('Learning_rate', self.lr, step=ep)
+            if ep % self.report_interval == 0:
+                with self.summary_writer.as_default():
+                    tf.summary.scalar('loss', loss[0], step=ep)
+                    tf.summary.scalar('Avg_reward', avg_rew, step=ep)
+                    tf.summary.scalar('Avg_len', avg_len, step=ep)
+                    tf.summary.scalar('Epsilon', self.epsilon, step=ep)
+                    tf.summary.scalar('Learning_rate', self.q.optimizer.lr.numpy(), step=ep)
             if ep % self.target_update_interval == 0:
                 self._update_target()
             if ep % self.save_interval == 0:
@@ -253,6 +258,7 @@ def parse_args():
 if __name__ == '__main__':
 
     args = parse_args(args=[])
+    # args = parse_args()
     env = gym.make('CartPole-v1')
     device = tf.test.gpu_device_name() if len(tf.config.list_physical_devices('GPU')) > 0 else '/device:CPU:0'
     with tf.device(device):
