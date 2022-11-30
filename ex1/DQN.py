@@ -6,7 +6,7 @@ from keras.models import Sequential
 from keras.layers import Dense, Dropout, BatchNormalization
 from keras.optimizers import Adam, RMSprop, SGD
 import tensorflow as tf
-
+import pandas as pd
 from collections import deque
 from typing import Tuple, List, Union
 from tqdm import tqdm
@@ -46,10 +46,10 @@ class ExperienceReplay:
         return self._exp_rep.__len__()
 
 
-
 class DQN():
     def __init__(
-            self, env: gym.Env, double_dqn: bool = False, hidden_dims: List[int] = [16, 32, 32, 16, 16], lr: float = 0.01, min_lr:float = 0.001, lr_decay:float = 0.999,
+            self, env: gym.Env, double_dqn: bool = False, hidden_dims: List[int] = [16, 32, 32, 16, 16],
+            lr: float = 0.01, min_lr: float = 0.001, lr_decay: float = 0.999,
             epsilon_bounds: list[float, float] = [1.0, 0.2], eps_decay_fraction: float = 0.25, gamma: float = 0.9999,
             learning_epochs: int = 16, batch_size: int = 128, target_update_interval: int = 16,
             steps_per_epoch: int = 128,
@@ -96,10 +96,9 @@ class DQN():
         m_args.pop('self')
         m_args.pop('env')
         with open(path.join(self.train_log_dir, 'params.json'), 'w') as f:
-            f.write(json.dumps(m_args,indent=4))
-        
-        self.running_rews = deque([],maxlen=100)
+            f.write(json.dumps(m_args, indent=4))
 
+        self.running_rews = deque([], maxlen=100)
 
         self.ckpt = tf.train.Checkpoint(step=tf.Variable(1), q=self.q, target=self.q_target)
         self.ckpt_mgr = tf.train.CheckpointManager(self.ckpt, path.join(self.train_log_dir, 'tf_ckpts'), max_to_keep=3)
@@ -133,9 +132,8 @@ class DQN():
         for val, var in zip(self.opt_init_states, self.q.optimizer.variables()):
             var.assign(val)
         self.q.optimizer.learning_rate = self.lr
-        assert np.allclose(self.q.optimizer.lr.numpy(),self.lr)
-        
-    
+        assert np.allclose(self.q.optimizer.lr.numpy(), self.lr)
+
     def _update_eps(self):
         # self.epsilon = 0.99 * self.epsilon
         if (self.epoch + 1) / self.n_epochs < self.eps_decay_fraction:
@@ -143,8 +141,7 @@ class DQN():
             self.epsilon = self.epsilon_bounds[0] - (self.epsilon_bounds[0] - self.epsilon_bounds[1]) * (
                     (self.epoch + 1) / final_decay_episode)
         if self.lr > self.min_lr:
-            self.lr*= self.lr_decay
-
+            self.lr *= self.lr_decay
 
     def get_action(self, state, epsilon=None):
         epsilon = self.epsilon if epsilon is None else epsilon
@@ -185,7 +182,7 @@ class DQN():
             next_state, reward, done, info = self.env.step(action)
             if done:
                 # This will throw a warning, but it is the only way to know if the episode was truncated or terminated
-                _, tmp_reward, _, _ = env.step(env.action_space.sample())
+                _, tmp_reward, _, _ = self.env.step(self.env.action_space.sample())
                 if tmp_reward < 1.0:
                     reward = -10
             episode_steps += 1
@@ -207,23 +204,23 @@ class DQN():
         ep_lengths.append(episode_steps)
         return ep_reward / episodes, sum(ep_lengths) / len(ep_lengths)
 
-    def evaluate(self, n_ep = 5):
+    def evaluate(self, n_ep=5):
         rewards = []
         ep_lengths = []
         for _ in range(n_ep):
             episode_steps = 0
             rewards.append(0)
-            state = env.reset()
+            state = self.env.reset()
             for step_num in range(500):
                 action = np.argmax(self.q(np.expand_dims(state, 0)))
-                next_state, reward, done, info = env.step(action)
-                rewards[-1]+=1
+                next_state, reward, done, info = self.env.step(action)
+                rewards[-1] += 1
                 if done:
                     ep_lengths.append(episode_steps)
                     break
                 state = next_state
                 episode_steps += 1
-        return(rewards,ep_lengths)
+        return (rewards, ep_lengths)
 
     def output_report(self):
         fig, ax = plt.subplots(2, 2, figsize=(10, 10))
@@ -249,7 +246,7 @@ class DQN():
             _, _ = self.collect_batch(self.steps_per_epoch)
             loss = self.learn()
             if ep % self.report_interval == 0:
-                rews,lengths = self.evaluate()
+                rews, lengths = self.evaluate()
                 self.running_rews.extend(rews)
                 with self.summary_writer.as_default():
                     tf.summary.scalar('loss', loss[0], step=ep)
@@ -286,16 +283,40 @@ def parse_args():
     for arg in args.keys():
         parser.add_argument(f'--{arg}', type=args[arg][0], default=args[arg][1], required=False)
     args = vars(parser.parse_args())
-    return(args)
+    return (args)
+
+
+def basic_plotter():
+    csv_filename = 'run-gradient_tape_20221130-161126_train-tag-Avg_reward.csv'
+    rolling = 72
+
+    df = pd.read_csv(csv_filename, header=0)
+    final_step = np.where(df.Value.rolling(rolling).mean() > 475.0)[0][0]
+    f, ax = plt.subplots(1, 1)
+    ax.plot(df.Step.iloc[:final_step], df.Value.iloc[:final_step], label='Episode Reward')
+    ax.plot(df.Step.iloc[:final_step], df.Value.rolling(rolling).mean().iloc[:final_step],
+            label='Rolling average episode reward')
+    # ax.plot(df.Step, df.Value, label='Episode Reward')
+    # ax.plot(df.Step, df.Value.rolling(rolling).mean(),
+    #         label='Rolling average episode reward')
+    ax.plot([0, df.Step.iloc[final_step]], [475, 475], 'k--', label='Target length')
+
+    ax.set_xlabel('Training Step')
+    ax.set_ylabel('Episode Reward')
+    plt.legend(loc=[0.02, 0.6])
+    plt.suptitle('Double DQN')
+    plt.tight_layout()
+    plt.savefig('Plots/DQN/Double_dqn.jpg')
+    print('donwe')
 
 
 if __name__ == '__main__':
-
     # args = parse_args(args=[])
-    args = parse_args()
-    env = gym.make('CartPole-v1')
-    device = tf.test.gpu_device_name() if len(tf.config.list_physical_devices('GPU')) > 0 else '/device:CPU:0'
-    with tf.device(device):
-        print(f"Device: {device}")
-        dqn = DQN(env,**args)
-        dqn.train(10000)
+    # args = parse_args()
+    # env = gym.make('CartPole-v1')
+    # device = tf.test.gpu_device_name() if len(tf.config.list_physical_devices('GPU')) > 0 else '/device:CPU:0'
+    # with tf.device(device):
+    #     print(f"Device: {device}")
+    #     dqn = DQN(env, **args)
+    #     dqn.train(10000)
+    basic_plotter()
