@@ -265,6 +265,13 @@ class DQN():
             if np.mean(self.running_rews) > 450:
                 self._save_model()
                 print('Reached Target!!!!')
+                with self.summary_writer.as_default():
+                    tf.summary.scalar('loss', loss[0], step=ep)
+                    tf.summary.scalar('Avg_reward', np.mean(rews), step=ep)
+                    tf.summary.scalar('Avg_len', np.mean(lengths), step=ep)
+                    tf.summary.scalar('Running_Avg_Rew', np.mean(self.running_rews), step=ep)
+                    tf.summary.scalar('Epsilon', self.epsilon, step=ep)
+                    tf.summary.scalar('Learning_rate', self.q.optimizer.lr.numpy(), step=ep)
                 break
 
 
