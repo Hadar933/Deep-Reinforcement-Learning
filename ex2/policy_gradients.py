@@ -1,7 +1,9 @@
 import gym
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
+# import tensorflow.compat.v1 as tf
 import collections
+from typing import List
 
 # optimized for Tf2
 tf.disable_v2_behavior()
@@ -40,6 +42,31 @@ class PolicyNetwork:
             self.loss = tf.reduce_mean(self.neg_log_prob * self.R_t)
             self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
 
+class ValueNetwork:
+        def __init__(self, state_size, hidden_layers= [12,12], learning_rate = 0.0004, name='value_network'):
+            self.state_size = state_size
+            self.learning_rate = learning_rate
+
+            with tf.variable_scope(name):
+
+                self.state = tf.placeholder(tf.float32, [None, self.state_size], name="state")
+                self.value = tf.placeholder(tf.int32, 1, name="value")
+                self.R_t = tf.placeholder(tf.float32, name="rewards-to-go")
+
+                tf2_initializer = tf.keras.initializers.glorot_normal(seed=0)
+                input_size = self.state_size
+                layer_input = self.state
+                for i in range(len(hidden_layers)-1):
+                    self.layers[i].w = tf.get_variable(f"w{i}", [input_size, hidden_layers[i]], initializer=tf2_initializer)
+                    self.layers[i].b = tf.get_variable(f"b{i}", [input_size, hidden_layers[i]], initializer=tf2_initializer)
+                    self.layers[i].z = tf.add(tf.matmul(layer_input, self.layers[i].w ), self.layers[i].b)
+                    layer_input      = tf.nn.relu(self.layers[i].z)
+                i += 1
+                self.output = tf.layers.dense(layer_input, units=1, activation=None)
+                self.loss = tf.reduce_mean((self.R_t - v)**2)
+                self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
+
+
 
 def run():
     # Define hyperparameters
@@ -56,6 +83,7 @@ def run():
     # Initialize the policy network
     tf.reset_default_graph()
     policy = PolicyNetwork(state_size, action_size, learning_rate)
+    value_net = ValueNetwork(state_size,hidden_layers=[12,12],learning_rate=learning_rate)
 
     # Start training the agent with REINFORCE algorithm
     with tf.Session() as sess:
@@ -100,10 +128,15 @@ def run():
 
             # Compute Rt for each time-step t and update the network's weights
             for t, transition in enumerate(episode_transitions):
+                # TODO: substract the baseline from reward-to-go (do it carefully)
+                # At = Rt-Vt
+                # see: https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html#baselines-in-policy-gradients
                 total_discounted_return = sum(discount_factor ** i * t.reward for i, t in enumerate(episode_transitions[t:])) # Rt
                 feed_dict = {policy.state: transition.state, policy.R_t: total_discounted_return, policy.action: transition.action}
                 _, loss = sess.run([policy.optimizer, policy.loss], feed_dict)
-
+            
+            # TODO: add training loop for the value network
+            # see also explanation in https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html#baselines-in-policy-gradients
 
 if __name__ == '__main__':
     run()
