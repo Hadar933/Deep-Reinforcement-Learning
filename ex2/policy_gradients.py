@@ -1,10 +1,14 @@
 import gym
 import numpy as np
-import tensorflow as tf
-# import tensorflow.compat.v1 as tf
+# import tensorflow as tf
+import tensorflow.compat.v1 as tf
+# from tensorf
 import collections
 from typing import List
+import json
+from os import path
 
+import datetime
 # optimized for Tf2
 tf.disable_v2_behavior()
 print("tf_ver:{}".format(tf.__version__))
@@ -46,6 +50,7 @@ class ValueNetwork:
         def __init__(self, state_size, hidden_layers= [12,12], learning_rate = 0.0004, name='value_network'):
             self.state_size = state_size
             self.learning_rate = learning_rate
+            self.layers = []
 
             with tf.variable_scope(name):
 
@@ -57,16 +62,31 @@ class ValueNetwork:
                 input_size = self.state_size
                 layer_input = self.state
                 for i in range(len(hidden_layers)-1):
-                    self.layers[i].w = tf.get_variable(f"w{i}", [input_size, hidden_layers[i]], initializer=tf2_initializer)
-                    self.layers[i].b = tf.get_variable(f"b{i}", [input_size, hidden_layers[i]], initializer=tf2_initializer)
-                    self.layers[i].z = tf.add(tf.matmul(layer_input, self.layers[i].w ), self.layers[i].b)
-                    layer_input      = tf.nn.relu(self.layers[i].z)
+                    self.layers.append({
+                        'w': tf.get_variable(f"w{i}", [input_size, hidden_layers[i]], initializer=tf2_initializer),
+                        'b': tf.get_variable(f"b{i}", [input_size, hidden_layers[i]], initializer=tf2_initializer),})
+                    self.layers[i]['z'] = tf.add(tf.matmul(layer_input, self.layers[i]['w'] ), self.layers[i]['b'])
+                    layer_input      = tf.nn.relu(self.layers[i]['z'])
                 i += 1
-                self.output = tf.layers.dense(layer_input, units=1, activation=None)
-                self.loss = tf.reduce_mean((self.R_t - v)**2)
+                self.value = tf.layers.dense(layer_input, units=1, activation=None)
+                self.loss = tf.reduce_mean((self.R_t - self.value)**2)
                 self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
 
 
+def setup_tensorboard():
+    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    train_log_dir = 'logs/gradient_tape/' + current_time + '/train'
+    tb_p_loss = tf.placeholder(tf.float32, 1)
+    tb_v_loss = tf.placeholder(tf.float32, 1)
+    tb_ep_rew = tf.placeholder(tf.float32, 1)
+    tb_avg_rew = tf.placeholder(tf.float32, 1)
+    tf.summary.scalar(name="p_loss", values=tb_p_loss)
+    tf.summary.scalar(name="v_loss", values=tb_v_loss)
+    tf.summary.scalar(name="Episode_Reward", values=tb_ep_rew)
+    tf.summary.scalar(name="Average_Reward", values=tb_avg_rew)
+    writer = tf.summary.FileWriter(train_log_dir)
+    summaries = tf.summary.merge_all()
+    return writer,summaries
 
 def run():
     # Define hyperparameters
@@ -76,14 +96,43 @@ def run():
     max_episodes = 5000
     max_steps = 501
     discount_factor = 0.99
-    learning_rate = 0.0004
-
+    p_learning_rate = 0.0004
+    v_learning_rate = 0.001
+    n_v_iter = 1
+    v_update_interval = 4
     render = False
+    baseline = True
 
     # Initialize the policy network
     tf.reset_default_graph()
-    policy = PolicyNetwork(state_size, action_size, learning_rate)
-    value_net = ValueNetwork(state_size,hidden_layers=[12,12],learning_rate=learning_rate)
+    policy = PolicyNetwork(state_size, action_size, p_learning_rate)
+    if baseline:
+        value_net = ValueNetwork(state_size,hidden_layers=[12,12],learning_rate=v_learning_rate)
+    
+    ### Logging
+    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    train_log_dir = './logs/' + current_time + '/train'
+    summary_writer = tf.summary.FileWriter(train_log_dir)
+    # Save params
+    m_args = []
+    m_args.append(f'{baseline=}')
+    m_args.append(f'{discount_factor=}')
+    m_args.append(f'{p_learning_rate=}')
+    m_args.append(f'{v_learning_rate=}')
+    m_args.append(f'{n_v_iter=}')
+    
+    with open(path.join(train_log_dir, 'params.json'), 'w') as f:
+        f.write(json.dumps(m_args, indent=4))
+    episode_reward = tf.Variable(0, dtype=tf.float32)
+    avg_reward = tf.Variable(0, dtype=tf.float32)
+    p_loss_th = tf.Variable(0, dtype=tf.float32)
+    v_loss_th = tf.Variable(0, dtype=tf.float32)
+    _ = tf.summary.scalar('Episode_reward',episode_reward)
+    _ = tf.summary.scalar('Avg_Reward',avg_reward)
+    _ = tf.summary.scalar('Policy_loss', p_loss_th)
+    _ = tf.summary.scalar('ValueFn_loss',v_loss_th)
+    
+    summaries = tf.summary.merge_all()
 
     # Start training the agent with REINFORCE algorithm
     with tf.Session() as sess:
@@ -116,7 +165,9 @@ def run():
                     if episode > 98:
                         # Check if solved
                         average_rewards = np.mean(episode_rewards[(episode - 99):episode+1])
+                    
                     print("Episode {} Reward: {} Average over 100 episodes: {}".format(episode, episode_rewards[episode], round(average_rewards, 2)))
+
                     if average_rewards > 475:
                         print(' Solved at episode: ' + str(episode))
                         solved = True
@@ -124,19 +175,38 @@ def run():
                 state = next_state
 
             if solved:
+                ths = [episode_reward,avg_reward]
+                vals = [episode_rewards[episode],average_rewards]
+                for th,val in zip(ths,vals):
+                    sess.run(th.assign(val))
+                summary_writer.add_summary(sess.run(summaries), global_step = episode)
                 break
 
             # Compute Rt for each time-step t and update the network's weights
+            
             for t, transition in enumerate(episode_transitions):
-                # TODO: substract the baseline from reward-to-go (do it carefully)
                 # At = Rt-Vt
                 # see: https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html#baselines-in-policy-gradients
-                total_discounted_return = sum(discount_factor ** i * t.reward for i, t in enumerate(episode_transitions[t:])) # Rt
-                feed_dict = {policy.state: transition.state, policy.R_t: total_discounted_return, policy.action: transition.action}
-                _, loss = sess.run([policy.optimizer, policy.loss], feed_dict)
-            
-            # TODO: add training loop for the value network
-            # see also explanation in https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html#baselines-in-policy-gradients
+                R_t = sum(discount_factor ** i * t.reward for i, t in enumerate(episode_transitions[t:])) # Rt
+                if baseline:
+                    feed_dict = {value_net.state: transition.state}
+                    A_t = R_t - sess.run(value_net.value,feed_dict)
+                
+                feed_dict = {policy.state: transition.state, policy.R_t: A_t if baseline else R_t, policy.action: transition.action}
+                _, p_loss = sess.run([policy.optimizer, policy.loss], feed_dict)
+                if baseline and episode % v_update_interval ==0 :
+                    for _ in range(n_v_iter):
+                        feed_dict = {value_net.state: transition.state, value_net.R_t: R_t}
+                        _, v_loss = sess.run([value_net.optimizer,value_net.loss], feed_dict)
+            if baseline:
+                ths = [episode_reward,avg_reward, p_loss_th,v_loss_th]
+                vals = [episode_rewards[episode],average_rewards,p_loss,v_loss]
+            else:
+                ths = [episode_reward,avg_reward, p_loss_th]
+                vals = [episode_rewards[episode],average_rewards,p_loss]
+            for th,val in zip(ths,vals):
+                sess.run(th.assign(val))
+            summary_writer.add_summary(sess.run(summaries), global_step = episode)
 
 if __name__ == '__main__':
     run()
