@@ -74,9 +74,10 @@ class ValueNetwork:
                 for i in range(len(hidden_layers)-1):
                     self.layers.append({
                         'w': tf.get_variable(f"w{i}", [input_size, hidden_layers[i]], initializer=tf2_initializer),
-                        'b': tf.get_variable(f"b{i}", [input_size, hidden_layers[i]], initializer=tf2_initializer),})
+                        'b': tf.get_variable(f"b{i}", [hidden_layers[i]], initializer=tf2_initializer),})
                     self.layers[i]['z'] = tf.add(tf.matmul(layer_input, self.layers[i]['w'] ), self.layers[i]['b'])
                     layer_input      = tf.nn.relu(self.layers[i]['z'])
+                    input_size = hidden_layers[i]
                 i += 1
                 self.value = tf.layers.dense(layer_input, units=1, activation=None)
                 self.loss = tf.reduce_mean((self.R_t - self.value)**2)
@@ -91,21 +92,22 @@ def run():
     max_episodes = 5000
     max_steps = 501
     discount_factor = 0.99
-    p_learning_rate = 0.0004
-    v_learning_rate = 0.005
+    p_learning_rate = 0.0002
+    v_learning_rate = 0.001
     n_v_iter = 1
     v_update_interval = 1
     render = False
-    baseline = False
-    actor_critic = False
+    baseline = True
+    actor_critic = True
+    v_layers = [12,12,12]
 
-    param_dict = dict_of(max_episodes,max_steps,discount_factor,p_learning_rate,v_learning_rate,n_v_iter,v_update_interval,render,baseline,actor_critic)
+    param_dict = dict_of(max_episodes,max_steps,discount_factor,p_learning_rate,v_learning_rate,n_v_iter,v_update_interval,render,baseline,actor_critic, v_layers)
 
     # Initialize the policy network
     tf.reset_default_graph()
     policy = PolicyNetwork(state_size, action_size, p_learning_rate)
     if baseline:
-        value_net = ValueNetwork(state_size,hidden_layers=[12,12],learning_rate=v_learning_rate)
+        value_net = ValueNetwork(state_size,hidden_layers=v_layers,learning_rate=v_learning_rate)
     
     ### Logging
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -129,6 +131,7 @@ def run():
 
     # Start training the agent with REINFORCE algorithm
     with tf.Session() as sess:
+        total_steps = 0
         sess.run(tf.global_variables_initializer())
         solved = False
         Transition = collections.namedtuple("Transition", ["state", "action", "reward", "next_state", "done"])
@@ -158,7 +161,7 @@ def run():
                     if episode > 98:
                         # Check if solved
                         average_rewards = np.mean(episode_rewards[(episode - 99):episode+1])
-                    
+                    total_steps+=step
                     print("Episode {} Reward: {} Average over 100 episodes: {}".format(episode, episode_rewards[episode], round(average_rewards, 2)))
 
                     if average_rewards > 475:
@@ -168,6 +171,11 @@ def run():
                 state = next_state
 
             if solved:
+                wandb.log({
+                        'Episode Reward':episode_reward,
+                        'Average Reward':avg_reward,
+                        'total Steps': total_steps
+                    })
                 ths = [episode_reward,avg_reward]
                 vals = [episode_rewards[episode],average_rewards]
                 for th,val in zip(ths,vals):
@@ -202,7 +210,8 @@ def run():
                         'Episode Reward':episode_reward,
                         'Average Reward':avg_reward,
                         'Policy Loss':p_loss,
-                        'Value Fn Loss': v_loss
+                        'Value Fn Loss': v_loss,
+                        'total Steps': total_steps
                     })
             else:
                 ths = [episode_reward,avg_reward, p_loss_th]
@@ -212,6 +221,7 @@ def run():
                         'Episode Reward':episode_reward,
                         'Average Reward':avg_reward,
                         'Policy Loss':p_loss,
+                        'total Steps': total_steps
                     })
             for th,val in zip(ths,vals):
                 sess.run(th.assign(val))
