@@ -7,6 +7,16 @@ import collections
 from typing import List
 import json
 from os import path
+from sorcery import dict_of
+
+try:
+    import wandb
+    is_wandb = True
+except ImportError:
+    print('Please install wandb (pip install wandb && wandb login) to log to weights and biases')
+    is_wandb = False
+
+
 
 import datetime
 # optimized for Tf2
@@ -74,19 +84,22 @@ class ValueNetwork:
 
 def run():
     # Define hyperparameters
+    
     state_size = 4
     action_size = env.action_space.n
 
     max_episodes = 5000
     max_steps = 501
     discount_factor = 0.99
-    p_learning_rate = 0.0005
-    v_learning_rate = 0.04
+    p_learning_rate = 0.0004
+    v_learning_rate = 0.005
     n_v_iter = 1
     v_update_interval = 1
     render = False
-    baseline = True
-    actor_critic = True
+    baseline = False
+    actor_critic = False
+
+    param_dict = dict_of(max_episodes,max_steps,discount_factor,p_learning_rate,v_learning_rate,n_v_iter,v_update_interval,render,baseline,actor_critic)
 
     # Initialize the policy network
     tf.reset_default_graph()
@@ -99,16 +112,10 @@ def run():
     train_log_dir = './logs/' + current_time + '/train'
     summary_writer = tf.summary.FileWriter(train_log_dir)
     # Save params
-    m_args = []
-    m_args.append(f'{baseline=}')
-    m_args.append(f'{actor_critic=}')
-    m_args.append(f'{discount_factor=}')
-    m_args.append(f'{p_learning_rate=}')
-    m_args.append(f'{v_learning_rate=}')
-    m_args.append(f'{n_v_iter=}')
-    
+    if is_wandb:
+        wandb.init(project="BGURL-Ex2",config=param_dict)
     with open(path.join(train_log_dir, 'params.json'), 'w') as f:
-        f.write(json.dumps(m_args, indent=4))
+        f.write(json.dumps(param_dict, indent=4))
     episode_reward = tf.Variable(0, dtype=tf.float32)
     avg_reward = tf.Variable(0, dtype=tf.float32)
     p_loss_th = tf.Variable(0, dtype=tf.float32)
@@ -190,9 +197,22 @@ def run():
             if baseline:
                 ths = [episode_reward,avg_reward, p_loss_th,v_loss_th]
                 vals = [episode_rewards[episode],average_rewards,p_loss,v_loss]
+                if is_wandb:
+                    wandb.log({
+                        'Episode Reward':episode_reward,
+                        'Average Reward':avg_reward,
+                        'Policy Loss':p_loss,
+                        'Value Fn Loss': v_loss
+                    })
             else:
                 ths = [episode_reward,avg_reward, p_loss_th]
                 vals = [episode_rewards[episode],average_rewards,p_loss]
+                if is_wandb:
+                    wandb.log({
+                        'Episode Reward':episode_reward,
+                        'Average Reward':avg_reward,
+                        'Policy Loss':p_loss,
+                    })
             for th,val in zip(ths,vals):
                 sess.run(th.assign(val))
             summary_writer.add_summary(sess.run(summaries), global_step = episode)
