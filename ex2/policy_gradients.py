@@ -72,22 +72,6 @@ class ValueNetwork:
                 self.loss = tf.reduce_mean((self.R_t - self.value)**2)
                 self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
 
-
-def setup_tensorboard():
-    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    train_log_dir = 'logs/gradient_tape/' + current_time + '/train'
-    tb_p_loss = tf.placeholder(tf.float32, 1)
-    tb_v_loss = tf.placeholder(tf.float32, 1)
-    tb_ep_rew = tf.placeholder(tf.float32, 1)
-    tb_avg_rew = tf.placeholder(tf.float32, 1)
-    tf.summary.scalar(name="p_loss", values=tb_p_loss)
-    tf.summary.scalar(name="v_loss", values=tb_v_loss)
-    tf.summary.scalar(name="Episode_Reward", values=tb_ep_rew)
-    tf.summary.scalar(name="Average_Reward", values=tb_avg_rew)
-    writer = tf.summary.FileWriter(train_log_dir)
-    summaries = tf.summary.merge_all()
-    return writer,summaries
-
 def run():
     # Define hyperparameters
     state_size = 4
@@ -96,12 +80,13 @@ def run():
     max_episodes = 5000
     max_steps = 501
     discount_factor = 0.99
-    p_learning_rate = 0.0004
-    v_learning_rate = 0.001
+    p_learning_rate = 0.0005
+    v_learning_rate = 0.04
     n_v_iter = 1
-    v_update_interval = 4
+    v_update_interval = 1
     render = False
     baseline = True
+    actor_critic = True
 
     # Initialize the policy network
     tf.reset_default_graph()
@@ -116,6 +101,7 @@ def run():
     # Save params
     m_args = []
     m_args.append(f'{baseline=}')
+    m_args.append(f'{actor_critic=}')
     m_args.append(f'{discount_factor=}')
     m_args.append(f'{p_learning_rate=}')
     m_args.append(f'{v_learning_rate=}')
@@ -187,14 +173,17 @@ def run():
             for t, transition in enumerate(episode_transitions):
                 # At = Rt-Vt
                 # see: https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html#baselines-in-policy-gradients
-                R_t = sum(discount_factor ** i * t.reward for i, t in enumerate(episode_transitions[t:])) # Rt
-                if baseline:
+                if actor_critic:
+                    R_t = transition.reward + (1-transition.done)*discount_factor*sess.run(value_net.value,{value_net.state: transition.next_state}) # R + v'(S')
+                else:
+                    R_t = sum(discount_factor ** i * t.reward for i, t in enumerate(episode_transitions[t:])) # Rt
+                if baseline or actor_critic:
                     feed_dict = {value_net.state: transition.state}
                     A_t = R_t - sess.run(value_net.value,feed_dict)
                 
                 feed_dict = {policy.state: transition.state, policy.R_t: A_t if baseline else R_t, policy.action: transition.action}
                 _, p_loss = sess.run([policy.optimizer, policy.loss], feed_dict)
-                if baseline and episode % v_update_interval ==0 :
+                if (baseline or actor_critic) and episode % v_update_interval ==0 :
                     for _ in range(n_v_iter):
                         feed_dict = {value_net.state: transition.state, value_net.R_t: R_t}
                         _, v_loss = sess.run([value_net.optimizer,value_net.loss], feed_dict)
