@@ -72,6 +72,45 @@ def discounted_return(gamma: float, rewards: List[float]) -> np.ndarray:
     return G
 
 
+def reinforcetst(env: CartPoleEnv,
+                 policy: nn.Module, optimizer: optim.Optimizer,
+                 n_episodes: int, gamma: float):
+    def init_dict():
+        return {'states': [], 'actions': [], 'rewards': []}
+
+    possible_actions = np.arange(env.action_space.n)
+    total_rewards = []
+    for ep in range(n_episodes):
+        history = init_dict()
+        state = env.reset()
+        done = False
+        while not done:
+            action_prob = policy(state).detach().numpy()
+            action = np.random.choice(possible_actions, p=action_prob)
+            next_state, reward, done, info = env.step(action)
+            history['states'].append(state), history['actions'].append(action), history['rewards'].append(reward)
+            state = next_state
+
+        tot_ep_rew = sum(history['rewards'])
+        total_rewards.append(tot_ep_rew)
+        TB_WRITER.add_scalar("Reward/ReinforceTER", tot_ep_rew, ep)
+
+        state_tensor = torch.FloatTensor(history['states'])
+        reward_tensor = torch.FloatTensor(discounted_return(gamma, history['rewards']).copy())
+        action_tensor = torch.LongTensor(history['actions'])
+        optimizer.zero_grad()
+        log_policy = torch.log(policy(state_tensor))
+        # we only choose the log policy that corresponds to actions that we chose
+        # log_policy: [|B|,2], index = [|B|,1] -> gathered log_policy [|B|,1]
+        gathered_log_policy = torch.gather(log_policy, 1, action_tensor[..., np.newaxis])
+        loss = torch.mean(- reward_tensor * gathered_log_policy.squeeze(1))
+        loss.backward()
+        optimizer.step()
+
+        avg_reward_last_100_epi = np.mean(total_rewards[-100:])
+        print(f"Episode [{ep}/{n_episodes}] -- avg reward: {avg_reward_last_100_epi:.2f}", end='\r')
+
+
 def reinforce(env: CartPoleEnv,
               policy: nn.Module, optimizer: optim.Optimizer,
               n_episodes: int, n_batches: int, gamma: float):
@@ -111,7 +150,7 @@ def reinforce(env: CartPoleEnv,
                     # we only choose the log policy that corresponds to actions that we chose
                     # log_policy: [|B|,2], index = [|B|,1] -> gathered log_policy [|B|,1]
                     gathered_log_policy = torch.gather(log_policy, 1, action_tensor[..., np.newaxis])
-                    loss = torch.mean(- reward_tensor * gathered_log_policy.squeeze())
+                    loss = torch.mean(- reward_tensor * gathered_log_policy.squeeze(1))
                     loss.backward()
                     optimizer.step()
 
@@ -171,7 +210,7 @@ def reinforce_with_baseline(env: CartPoleEnv,
                     policy_opt.step()
 
                     # vf_loss = F.mse_loss(value_s, reward_tensor)
-                    vf_loss = - advantage * value_s
+                    vf_loss = I * torch.mean(-advantage * value_s)
                     vf_loss.backward()
                     value_opt.step()
 
@@ -243,7 +282,7 @@ if __name__ == '__main__':
 
     cart_pole: CartPoleEnv = gym.make('CartPole-v1')
     pr_dropout = 0.6
-    hidden_layer_dims = [128, 128]
+    hidden_layer_dims = [64, 64]
 
     pi_net = PolicyNetwork(hidden_layer_dims, pr_dropout, cart_pole)
     v_net = ValueFunctionNetwork(hidden_layer_dims, pr_dropout, cart_pole)
@@ -251,16 +290,18 @@ if __name__ == '__main__':
     gamma_discount = 0.99
     batch_iters = 10
     num_episodes = 10000
-
-    pi_opt = optim.Adam(pi_net.layers.parameters(), lr=0.001)
-    v_opt = optim.Adam(v_net.layers.parameters(), 0.0002)
+    REINFORCE_PI_LR = 0.001
+    A2C_PI_LR = 0.0004
+    A2C_V_LR = 0.01
+    pi_opt = optim.Adam(pi_net.layers.parameters(), lr=REINFORCE_PI_LR)
+    v_opt = optim.Adam(v_net.layers.parameters(), lr=A2C_V_LR)
 
     print("REINFORCE")
-    reinforce(cart_pole, pi_net, pi_opt, num_episodes, 20, gamma_discount)
+    reinforcetst(cart_pole, pi_net, pi_opt, num_episodes, gamma_discount)
     print("REINFORCE w/Baseline")
-    reinforce_with_baseline(cart_pole, pi_net, v_net, pi_opt, v_opt, num_episodes, 20, gamma_discount)
+    # reinforce_with_baseline(cart_pole, pi_net, v_net, pi_opt, v_opt, num_episodes, 20, gamma_discount)
     print("Actor Critic")
-    A2C(cart_pole, pi_net, v_net, pi_opt, v_opt, num_episodes, 1000, gamma_discount)
+    # A2C(cart_pole, pi_net, v_net, pi_opt, v_opt, num_episodes, 1000, gamma_discount)
 
     TB_WRITER.flush()
     TB_WRITER.close()
