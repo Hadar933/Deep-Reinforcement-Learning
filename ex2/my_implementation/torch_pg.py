@@ -7,9 +7,14 @@ import numpy as np
 import torch
 from gym.envs.classic_control import CartPoleEnv
 from torch import nn, optim
+from torch.distributions import Categorical
 from torch.utils.tensorboard import SummaryWriter
+from itertools import count
+from torch.autograd import Variable
+from collections import deque
 
-np.random.seed(1)
+np.random.seed(543)
+torch.manual_seed(543)
 
 
 class PolicyNetwork(nn.Module):
@@ -72,153 +77,99 @@ def discounted_return(gamma: float, rewards: List[float]) -> np.ndarray:
     return G
 
 
-def reinforcetst(env: CartPoleEnv,
-                 policy: nn.Module, optimizer: optim.Optimizer,
-                 n_episodes: int, gamma: float):
-    def init_dict():
-        return {'states': [], 'actions': [], 'rewards': []}
-
-    possible_actions = np.arange(env.action_space.n)
-    total_rewards = []
-    for ep in range(n_episodes):
-        history = init_dict()
-        state = env.reset()
-        done = False
-        while not done:
-            action_prob = policy(state).detach().numpy()
-            action = np.random.choice(possible_actions, p=action_prob)
-            next_state, reward, done, info = env.step(action)
-            history['states'].append(state), history['actions'].append(action), history['rewards'].append(reward)
-            state = next_state
-
-        tot_ep_rew = sum(history['rewards'])
-        total_rewards.append(tot_ep_rew)
-        TB_WRITER.add_scalar("Reward/ReinforceTER", tot_ep_rew, ep)
-
-        state_tensor = torch.FloatTensor(history['states'])
-        reward_tensor = torch.FloatTensor(discounted_return(gamma, history['rewards']).copy())
-        action_tensor = torch.LongTensor(history['actions'])
-        optimizer.zero_grad()
-        log_policy = torch.log(policy(state_tensor))
-        # we only choose the log policy that corresponds to actions that we chose
-        # log_policy: [|B|,2], index = [|B|,1] -> gathered log_policy [|B|,1]
-        gathered_log_policy = torch.gather(log_policy, 1, action_tensor[..., np.newaxis])
-        loss = torch.mean(- reward_tensor * gathered_log_policy.squeeze(1))
-        loss.backward()
-        optimizer.step()
-
-        avg_reward_last_100_epi = np.mean(total_rewards[-100:])
-        print(f"Episode [{ep}/{n_episodes}] -- avg reward: {avg_reward_last_100_epi:.2f}", end='\r')
-
-
 def reinforce(env: CartPoleEnv,
               policy: nn.Module, optimizer: optim.Optimizer,
-              n_episodes: int, n_batches: int, gamma: float):
-    def init_dict():
-        return {'states': [], 'actions': [], 'rewards': []}
+              n_episodes: int, gamma: float):
+    rewards_arr = []
+    eps = np.finfo(np.float32).eps.item()
 
-    possible_actions = np.arange(env.action_space.n)
-    curr_episode = 1
-    total_rewards = []
-    batched_history = init_dict()
     for ep in range(n_episodes):
-        history = init_dict()
+        ep_H = {'states': [], 'actions': [], 'rewards': [], 'log_probs': []}
         state = env.reset()
+        ep_tot_rew = 0
         done = False
         while not done:
-            action_prob = policy(state).detach().numpy()
-            action = np.random.choice(possible_actions, p=action_prob)
-            next_state, reward, done, info = env.step(action)
-            history['states'].append(state), history['actions'].append(action), history['rewards'].append(reward)
-            state = next_state
+            state = torch.from_numpy(state).float().unsqueeze(0)
+            action_probs = policy(state)
+            m = Categorical(action_probs)
+            action = m.sample()
+            ep_H['log_probs'].append(m.log_prob(action))
+            action = action.item()
+            state, reward, done, info = env.step(action)
+            ep_tot_rew += reward
+            ep_H['rewards'].append(reward)
 
-            if done:
-                batched_history['states'].extend(history['states'])
-                batched_history['actions'].extend(history['actions'])
-                batched_history['rewards'].extend(discounted_return(gamma, history['rewards']))
-                tot_ep_rew = sum(history['rewards'])
-                total_rewards.append(tot_ep_rew)
-                TB_WRITER.add_scalar("Reward/ReinforceTER", tot_ep_rew, ep)
-                curr_episode += 1
-                if curr_episode == n_batches:
-                    optimizer.zero_grad()
-                    state_tensor = torch.FloatTensor(batched_history['states'])
-                    reward_tensor = torch.FloatTensor(batched_history['rewards'])
-                    action_tensor = torch.LongTensor(batched_history['actions'])
-
-                    log_policy = torch.log(policy(state_tensor))
-                    # we only choose the log policy that corresponds to actions that we chose
-                    # log_policy: [|B|,2], index = [|B|,1] -> gathered log_policy [|B|,1]
-                    gathered_log_policy = torch.gather(log_policy, 1, action_tensor[..., np.newaxis])
-                    loss = torch.mean(- reward_tensor * gathered_log_policy.squeeze(1))
-                    loss.backward()
-                    optimizer.step()
-
-                    batched_history = init_dict()
-                    curr_episode = 1
-
-        avg_reward_last_100_epi = np.mean(total_rewards[-100:])
-        print(f"Episode [{ep}/{n_episodes}] -- avg reward: {avg_reward_last_100_epi:.2f}", end='\r')
+        TB_WRITER.add_scalar("Reward/ReinforceTER", ep_tot_rew, ep)
+        returns = torch.tensor(discounted_return(gamma, ep_H['rewards']).copy())
+        returns = (returns - returns.mean()) / (returns.std() + eps)
+        policy_loss = []
+        for log_prob, R in zip(ep_H['log_probs'], returns):
+            policy_loss.append(-log_prob * R)
+        optimizer.zero_grad()
+        policy_loss = torch.cat(policy_loss).sum()
+        policy_loss.backward()
+        optimizer.step()
+        rewards_arr.append(ep_tot_rew)
+        mean_last_100 = np.mean(rewards_arr[-100:])
+        print(f"Episode [{ep}/{n_episodes}] -- avg reward: {mean_last_100:.2f}", end='\r')
+        if mean_last_100 >= env.spec.reward_threshold:
+            print("Reached env goal!")
+            return
 
 
-def reinforce_with_baseline(env: CartPoleEnv,
-                            policy_net: nn.Module, value_net: nn.Module,
-                            policy_opt: optim.Optimizer, value_opt: optim.Optimizer,
-                            n_episodes: int, n_iters: int, gamma: float):
-    def init_dict():
-        return {'states': [], 'actions': [], 'rewards': []}
-
-    possible_actions = np.arange(env.action_space.n)
-    curr_episode = 1
-    total_rewards = []
-    batched_history = init_dict()
+def reinforce_with_baseline_tst(env: CartPoleEnv,
+                                policy_net: nn.Module, value_net: nn.Module,
+                                policy_opt: optim.Optimizer, value_opt: optim.Optimizer,
+                                n_episodes: int, n_iters: int, gamma: float):
+    rewards_arr = []
+    eps = np.finfo(np.float32).eps.item()
     I = 1
     for ep in range(n_episodes):
         I *= gamma
-        history = init_dict()
+        ep_H = {'states': [], 'actions': [], 'rewards': [], 'log_probs': [], 'state_values': []}
         state = env.reset()
+        ep_tot_rew = 0
         done = False
         while not done:
-            action_prob = policy_net(state).detach().numpy()
-            action = np.random.choice(possible_actions, p=action_prob)
-            next_state, reward, done, info = env.step(action)
-            history['states'].append(state), history['actions'].append(action), history['rewards'].append(reward)
-            state = next_state
+            state = torch.from_numpy(state).float().unsqueeze(0)
+            action_probs = policy_net(state)
+            m = Categorical(action_probs)
+            action = m.sample()
+            ep_H['log_probs'].append(m.log_prob(action))
+            action = action.item()
+            state, reward, done, info = env.step(action)
+            ep_tot_rew += reward
+            ep_H['rewards'].append(reward)
+            state_value = value_net(state)
+            ep_H['state_values'].append(state_value)
 
-            if done:
-                batched_history['states'].extend(history['states'])
-                batched_history['actions'].extend(history['actions'])
-                batched_history['rewards'].extend(discounted_return(gamma, history['rewards']))
-                tot_ep_rew = sum(history['rewards'])
-                total_rewards.append(tot_ep_rew)
-                TB_WRITER.add_scalar("Reward/ReinforceWBaselineTER", tot_ep_rew, ep)
-                curr_episode += 1
-                if curr_episode == n_iters:
-                    policy_opt.zero_grad()
-                    value_opt.zero_grad()
-                    state_tensor = torch.FloatTensor(batched_history['states'])
-                    reward_tensor = torch.FloatTensor(batched_history['rewards'])
-                    action_tensor = torch.LongTensor(batched_history['actions'])
+        TB_WRITER.add_scalar("Reward/ReinforceWBaselineTER", ep_tot_rew, ep)
+        returns = torch.tensor(discounted_return(gamma, ep_H['rewards']).copy())
+        returns = (returns - returns.mean()) / (returns.std() + eps)
+        policy_loss = []
+        value_loss = []
+        for log_prob, r, s_value in zip(ep_H['log_probs'], returns, ep_H['state_values']):
+            with torch.no_grad(): advantage = r - s_value
+            policy_loss.append(-advantage * log_prob)
+            # value_loss.append(-advantage * s_value)
+            value_loss.append(F.smooth_l1_loss(s_value, torch.tensor([r])))
 
-                    value_s = value_net(state_tensor).squeeze()
-                    with torch.no_grad():
-                        advantage = reward_tensor - value_s
-                    log_policy = torch.log(policy_net(state_tensor))
-                    gathered_log_policy = torch.gather(log_policy, 1, action_tensor[..., np.newaxis])
-                    policy_loss = I * torch.mean(- advantage * gathered_log_policy.squeeze())
-                    policy_loss.backward()
-                    policy_opt.step()
+        policy_opt.zero_grad()
+        policy_loss = I * torch.cat(policy_loss).sum()
+        policy_loss.backward()
+        policy_opt.step()
 
-                    # vf_loss = F.mse_loss(value_s, reward_tensor)
-                    vf_loss = I * torch.mean(-advantage * value_s)
-                    vf_loss.backward()
-                    value_opt.step()
+        value_opt.zero_grad()
+        value_loss = I * torch.stack(value_loss).sum()
+        value_loss.backward()
+        value_opt.step()
 
-                    batched_history = init_dict()
-                    curr_episode = 1
-
-        avg_reward_last_100_epi = np.mean(total_rewards[-100:])
-        print(f"Episode [{ep}/{n_episodes}] -- avg reward: {avg_reward_last_100_epi:.2f}", end='\r')
+        rewards_arr.append(ep_tot_rew)
+        mean_last_100 = np.mean(rewards_arr[-100:])
+        print(f"Episode [{ep}/{n_episodes}] -- avg reward: {mean_last_100:.2f}", end='\r')
+        if mean_last_100 >= env.spec.reward_threshold:
+            print("Reached env goal!")
+            return
 
 
 def A2C(env: CartPoleEnv,
@@ -282,24 +233,23 @@ if __name__ == '__main__':
 
     cart_pole: CartPoleEnv = gym.make('CartPole-v1')
     pr_dropout = 0.6
-    hidden_layer_dims = [64, 64]
+    hidden_layer_dims = [128]  # for A2C 0-> [64,64]
 
     pi_net = PolicyNetwork(hidden_layer_dims, pr_dropout, cart_pole)
     v_net = ValueFunctionNetwork(hidden_layer_dims, pr_dropout, cart_pole)
 
     gamma_discount = 0.99
-    batch_iters = 10
     num_episodes = 10000
-    REINFORCE_PI_LR = 0.001
+    REINFORCE_PI_LR = 0.01
     A2C_PI_LR = 0.0004
     A2C_V_LR = 0.01
     pi_opt = optim.Adam(pi_net.layers.parameters(), lr=REINFORCE_PI_LR)
     v_opt = optim.Adam(v_net.layers.parameters(), lr=A2C_V_LR)
 
     print("REINFORCE")
-    reinforcetst(cart_pole, pi_net, pi_opt, num_episodes, gamma_discount)
+    # reinforce(cart_pole, pi_net, pi_opt, num_episodes, gamma_discount)
     print("REINFORCE w/Baseline")
-    # reinforce_with_baseline(cart_pole, pi_net, v_net, pi_opt, v_opt, num_episodes, 20, gamma_discount)
+    reinforce_with_baseline_tst(cart_pole, pi_net, v_net, pi_opt, v_opt, num_episodes, 20, gamma_discount)
     print("Actor Critic")
     # A2C(cart_pole, pi_net, v_net, pi_opt, v_opt, num_episodes, 1000, gamma_discount)
 
