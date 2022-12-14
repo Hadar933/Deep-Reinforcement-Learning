@@ -249,9 +249,9 @@ if __name__ == '__main__':
     print("REINFORCE")
     # reinforce(cart_pole, pi_net, pi_opt, num_episodes, gamma_discount)
     print("REINFORCE w/Baseline")
-    reinforce_with_baseline_tst(cart_pole, pi_net, v_net, pi_opt, v_opt, num_episodes, 20, gamma_discount)
+    # reinforce_with_baseline_tst(cart_pole, pi_net, v_net, pi_opt, v_opt, num_episodes, 20, gamma_discount)
     print("Actor Critic")
-    # A2C(cart_pole, pi_net, v_net, pi_opt, v_opt, num_episodes, 1000, gamma_discount)
+    A2C(cart_pole, pi_net, v_net, pi_opt, v_opt, num_episodes, 1000, gamma_discount)
 
     TB_WRITER.flush()
     TB_WRITER.close()
