@@ -15,8 +15,8 @@
 
  
 ## Exercises
-| Exercise              |   Description                                                                      |
-| ----------------------|:----------------------------------------------------------------------------------:|
-| ex1                   |  **Q-Learning** and **Deep-Q-Learning (DQN)** implementations from scratch         |
-| ex2                   |   **REINFORCE** (with and without baseline) and **One-Step Actor-Critic** implementations from scratch                                                                                                      |
-| ex3                   |                                                                                    |  
+| Exercise              |   Description                                                                                             |
+| ----------------------|:---------------------------------------------------------------------------------------------------------:|
+| ex1                   |  **Q-Learning** and **Deep-Q-Learning (DQN)** implementations from scratch                                |
+| ex2                   |   **REINFORCE** (with and without baseline) and **Monte Carlo Actor-Critic** implementations from scratch |
+| ex3                   |                                                                                                           |  
