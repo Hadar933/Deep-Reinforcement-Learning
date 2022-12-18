@@ -9,7 +9,7 @@
 | Policy Gradients     | REINFORCE, REINFORCE with Baseline, Actor-Critic methods                           |  
 | Imitation Learning   | Apprenticeship, Supervised and forward learning. Dagger, Dagger with coaching      |  
 | Multi-Armed Bandit   | Bandit algorithm, Gradient based algorithm, contextual bandits, Thompson sampling  |   
-|                      |                                                                                    |   
+| RL use-case: AlphaGo | Monte Carlo Tree Search, AlphaGo, AlphaZero                                        |   
 |                      |                                                                                    |   
 
 
