@@ -10,7 +10,7 @@
 | Imitation Learning         | Apprenticeship, Supervised and forward learning. Dagger, Dagger with coaching      |  
 | Multi-Armed Bandit         | Bandit algorithm, Gradient based algorithm, contextual bandits, Thompson sampling  |   
 | RL use-case: AlphaGo       | Monte Carlo Tree Search, AlphaGo, AlphaZero                                        |   
-| Meta and Transfer Learning | Contepts in Meta learning and Transfer learning in the context of RL               |   
+| Meta and Transfer Learning | Concepts in Meta learning and Transfer learning in the context of RL               |   
 
 
  
